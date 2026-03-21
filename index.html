@@ -45,7 +45,8 @@ const game = {
   screen: 'title',
   score: 0,
   level: 1,
-  cracks: 0
+  cracks: 0,
+  latchedDevil: null
 };
 
 // --- Player ---
@@ -62,6 +63,11 @@ const player = {
 const objects = [];
 let spawnTimer = 0;
 const SPAWN_INTERVAL = 1.0;
+let flashTimer = 0;
+
+// --- Devil Enemies ---
+let devilSpawnTimer = 0;
+let devilSpawnInterval = 15 + Math.random() * 5; // 15-20 seconds
 
 const COIN_TYPES = [
   { emoji: '\u{1FA99}', value: 1, weight: 60 },
@@ -79,10 +85,28 @@ function pickCoinType() {
   return COIN_TYPES[0];
 }
 
-function spawnCoin() {
+function spawnObject() {
+  // Bomb chance: 5-10% depending on level
+  const bombChance = 0.05 + game.level * 0.02;
+  if (Math.random() < bombChance) {
+    const size = 40;
+    objects.push({
+      type: 'bomb',
+      x: Math.random() * (WIDTH - size) + size / 2,
+      y: -size / 2,
+      width: size,
+      height: size,
+      speed: 180,
+      emoji: '\u{1F4A3}',
+      value: 0
+    });
+    return;
+  }
+
   const type = pickCoinType();
   const size = 36;
   objects.push({
+    type: 'coin',
     x: Math.random() * (WIDTH - size) + size / 2,
     y: -size / 2,
     width: size,
@@ -90,6 +114,24 @@ function spawnCoin() {
     speed: 150,
     emoji: type.emoji,
     value: type.value
+  });
+}
+
+function spawnDevil() {
+  const size = 40;
+  objects.push({
+    type: 'devil',
+    emoji: '\u{1F608}',
+    x: Math.random() * (WIDTH - size) + size / 2,
+    y: -40,
+    width: size,
+    height: size,
+    speed: 100,
+    latched: false,
+    hammerTimer: 0,
+    shakeProgress: 0,
+    shakeRequired: 8,
+    hammerAnimTimer: 0
   });
 }
 
@@ -101,11 +143,18 @@ window.addEventListener('keydown', (e) => {
   }
   keys[e.key] = true;
 
-  if (e.key === ' ' && game.screen === 'title') {
+  if (e.key === ' ' && (game.screen === 'title' || game.screen === 'gameOver')) {
     game.screen = 'playing';
     game.score = 0;
+    game.level = 1;
+    game.cracks = 0;
+    game.latchedDevil = null;
     objects.length = 0;
     spawnTimer = 0;
+    flashTimer = 0;
+    devilSpawnTimer = 0;
+    devilSpawnInterval = 15 + Math.random() * 5;
+    player.x = WIDTH / 2;
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -123,8 +172,20 @@ function aabb(a, b) {
 }
 
 // --- Update ---
+function triggerDamage() {
+  game.cracks++;
+  game.score = Math.max(0, game.score - 5);
+  flashTimer = 0.3;
+  if (game.cracks >= 3) {
+    game.screen = 'gameOver';
+  }
+}
+
 function update(dt) {
   if (game.screen !== 'playing') return;
+
+  // Flash timer countdown
+  if (flashTimer > 0) flashTimer -= dt;
 
   // Player movement
   if (keys['ArrowLeft']) {
@@ -138,11 +199,46 @@ function update(dt) {
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
 
-  // Spawn timer
+  // Spawn timer (coins and bombs)
   spawnTimer += dt;
   if (spawnTimer >= SPAWN_INTERVAL) {
     spawnTimer -= SPAWN_INTERVAL;
-    spawnCoin();
+    spawnObject();
+  }
+
+  // Devil spawn timer
+  devilSpawnTimer += dt;
+  if (devilSpawnTimer >= devilSpawnInterval) {
+    devilSpawnTimer = 0;
+    devilSpawnInterval = 15 + Math.random() * 5;
+    spawnDevil();
+  }
+
+  // Update latched devil
+  if (game.latchedDevil) {
+    const devil = game.latchedDevil;
+    devil.x = player.x;
+    devil.y = player.y - 45;
+    devil.hammerTimer += dt;
+    devil.hammerAnimTimer += dt;
+
+    // Devil hammer timer expired - causes damage
+    if (devil.hammerTimer >= 5.0) {
+      triggerDamage();
+      // Add fly-away devil to objects for animation
+      objects.push({
+        type: 'devil',
+        emoji: devil.emoji,
+        x: devil.x,
+        y: devil.y,
+        width: devil.width,
+        height: devil.height,
+        speed: 0,
+        flyAway: true,
+        flyAwayTimer: 0.5
+      });
+      game.latchedDevil = null;
+    }
   }
 
   // Update falling objects
@@ -150,11 +246,48 @@ function update(dt) {
     const obj = objects[i];
     obj.y += obj.speed * dt;
 
+    // Fly-away devils (animation only)
+    if (obj.flyAway) {
+      obj.flyAwayTimer -= dt;
+      obj.y -= 300 * dt;
+      obj.x += 150 * dt;
+      if (obj.flyAwayTimer <= 0) {
+        objects.splice(i, 1);
+      }
+      continue;
+    }
+
     // Collision with player
     if (aabb(player, obj)) {
-      game.score += obj.value;
-      objects.splice(i, 1);
-      continue;
+      if (obj.type === 'bomb') {
+        triggerDamage();
+        objects.splice(i, 1);
+        continue;
+      } else if (obj.type === 'devil') {
+        // Only latch if no devil currently latched
+        if (!game.latchedDevil) {
+          obj.latched = true;
+          game.latchedDevil = {
+            emoji: obj.emoji,
+            x: player.x,
+            y: player.y - 45,
+            width: obj.width,
+            height: obj.height,
+            hammerTimer: 0,
+            shakeProgress: 0,
+            shakeRequired: 8,
+            hammerAnimTimer: 0
+          };
+        }
+        // Remove from falling objects either way (bounced off or latched)
+        objects.splice(i, 1);
+        continue;
+      } else {
+        // Coin
+        game.score += obj.value;
+        objects.splice(i, 1);
+        continue;
+      }
     }
 
     // Off screen
@@ -174,6 +307,8 @@ function draw() {
     drawTitle();
   } else if (game.screen === 'playing') {
     drawPlaying();
+  } else if (game.screen === 'gameOver') {
+    drawGameOver();
   }
 }
 
@@ -199,8 +334,14 @@ function drawPlaying() {
   // Falling objects
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = '32px sans-serif';
   for (const obj of objects) {
+    if (obj.type === 'bomb') {
+      ctx.font = '36px sans-serif';
+    } else if (obj.type === 'devil') {
+      ctx.font = '36px sans-serif';
+    } else {
+      ctx.font = '32px sans-serif';
+    }
     ctx.fillText(obj.emoji, obj.x, obj.y);
   }
 
@@ -208,12 +349,84 @@ function drawPlaying() {
   ctx.font = '48px sans-serif';
   ctx.fillText(player.emoji, player.x, player.y);
 
+  // Latched devil on top of player
+  if (game.latchedDevil) {
+    const devil = game.latchedDevil;
+    ctx.font = '36px sans-serif';
+    ctx.fillText(devil.emoji, devil.x, devil.y);
+
+    // Hammer animation: alternate left/right every 0.3s
+    const hammerSide = Math.floor(devil.hammerAnimTimer / 0.3) % 2 === 0 ? -1 : 1;
+    ctx.font = '24px sans-serif';
+    ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15);
+
+    // Danger bar above the piggy
+    const barWidth = 60;
+    const barHeight = 8;
+    const barX = player.x - barWidth / 2;
+    const barY = player.y - 75;
+    const fill = Math.min(devil.hammerTimer / 5.0, 1.0);
+
+    // Bar background
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // Bar fill (red)
+    let barAlpha = 1.0;
+    if (fill > 0.8) {
+      // Pulse when >80%
+      barAlpha = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 100));
+    }
+    ctx.globalAlpha = barAlpha;
+    ctx.fillStyle = '#ff2222';
+    ctx.fillRect(barX, barY, barWidth * fill, barHeight);
+    ctx.globalAlpha = 1.0;
+
+    // Bar border
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
+  }
+
   // Score HUD
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.font = '24px sans-serif';
   ctx.fillStyle = '#2d2d2d';
   ctx.fillText('\u{1FA99} Score: ' + game.score, 15, 15);
+
+  // Crack indicator (top-right)
+  ctx.textAlign = 'right';
+  let crackText = '\u{1F437}';
+  for (let i = 0; i < game.cracks; i++) {
+    crackText += '\u{1F494}';
+  }
+  ctx.fillText(crackText, WIDTH - 15, 15);
+
+  // Red flash overlay
+  if (flashTimer > 0) {
+    ctx.globalAlpha = flashTimer / 0.3 * 0.4;
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.globalAlpha = 1.0;
+  }
+}
+
+function drawGameOver() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.font = '48px sans-serif';
+  ctx.fillStyle = '#2d2d2d';
+  ctx.fillText('\u{1F494} Game Over! \u{1F494}', WIDTH / 2, HEIGHT / 2 - 50);
+
+  ctx.font = '32px sans-serif';
+  ctx.fillStyle = '#444';
+  ctx.fillText('\u{1FA99} Final Score: ' + game.score, WIDTH / 2, HEIGHT / 2 + 10);
+
+  ctx.font = '24px sans-serif';
+  ctx.fillStyle = '#666';
+  ctx.fillText('Press SPACE to restart', WIDTH / 2, HEIGHT / 2 + 60);
 }
 
 // --- Game Loop ---
