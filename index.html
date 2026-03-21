@@ -40,13 +40,31 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
+// --- Level Configuration ---
+function getLevelConfig(level) {
+  return {
+    duration: 30 + level * 5,
+    fallSpeed: 120 + level * 20,
+    spawnRate: Math.max(0.3, 1.0 - level * 0.1),
+    devilCount: level,
+    devilInterval: null, // calculated below
+    bombChance: Math.min(0.25, 0.03 + level * 0.02),
+    billChance: Math.min(0.3, 0.1 + level * 0.05),
+    goldChance: Math.min(0.15, 0.05 + level * 0.02)
+  };
+}
+
 // --- Game State ---
 const game = {
   screen: 'title',
   score: 0,
   level: 1,
   cracks: 0,
-  latchedDevil: null
+  latchedDevil: null,
+  levelTimer: 0,
+  levelConfig: null,
+  devilsSpawned: 0,
+  devilSchedule: []
 };
 
 // --- Player ---
@@ -62,7 +80,6 @@ const player = {
 // --- Falling Objects ---
 const objects = [];
 let spawnTimer = 0;
-const SPAWN_INTERVAL = 1.0;
 let flashTimer = 0;
 
 // --- Shake Mechanic ---
@@ -73,6 +90,10 @@ const ejectedCoins = [];
 let squealTimer = 0;
 let successFlashTimer = 0;
 let shakeHintTimer = 0;
+
+// --- Title screen background coins ---
+const titleCoins = [];
+let titleCoinTimer = 0;
 
 // --- Audio ---
 let audioCtx = null;
@@ -111,10 +132,24 @@ function playShakeSound() {
   osc.stop(ctx.currentTime + 0.05);
 }
 
-// --- Devil Enemies ---
-let devilSpawnTimer = 0;
-let devilSpawnInterval = 15 + Math.random() * 5; // 15-20 seconds
+function playLevelComplete() {
+  const actx = getAudioContext();
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((freq, i) => {
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.12);
+    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.12);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.12 + 0.3);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(actx.currentTime + i * 0.12);
+    osc.stop(actx.currentTime + i * 0.12 + 0.3);
+  });
+}
 
+// --- Coin Types ---
 const COIN_TYPES = [
   { emoji: '\u{1FA99}', value: 1, weight: 60 },
   { emoji: '\u{1F4B5}', value: 5, weight: 25 },
@@ -122,18 +157,20 @@ const COIN_TYPES = [
 ];
 
 function pickCoinType() {
-  const roll = Math.random() * 100;
-  let cumulative = 0;
-  for (const type of COIN_TYPES) {
-    cumulative += type.weight;
-    if (roll < cumulative) return type;
-  }
-  return COIN_TYPES[0];
+  if (!game.levelConfig) return COIN_TYPES[0];
+  const cfg = game.levelConfig;
+  // Use level config chances to adjust weights
+  const roll = Math.random();
+  if (roll < cfg.goldChance) return COIN_TYPES[2]; // gold bag
+  if (roll < cfg.goldChance + cfg.billChance) return COIN_TYPES[1]; // bill
+  return COIN_TYPES[0]; // regular coin
 }
 
 function spawnObject() {
-  // Bomb chance: 5-10% depending on level
-  const bombChance = 0.05 + game.level * 0.02;
+  const cfg = game.levelConfig;
+  const fallSpeed = cfg ? cfg.fallSpeed : 150;
+  const bombChance = cfg ? cfg.bombChance : 0.05;
+
   if (Math.random() < bombChance) {
     const size = 40;
     objects.push({
@@ -142,7 +179,7 @@ function spawnObject() {
       y: -size / 2,
       width: size,
       height: size,
-      speed: 180,
+      speed: fallSpeed * 1.2,
       emoji: '\u{1F4A3}',
       value: 0
     });
@@ -157,13 +194,15 @@ function spawnObject() {
     y: -size / 2,
     width: size,
     height: size,
-    speed: 150,
+    speed: fallSpeed,
     emoji: type.emoji,
     value: type.value
   });
 }
 
 function spawnDevil() {
+  const cfg = game.levelConfig;
+  const fallSpeed = cfg ? cfg.fallSpeed : 100;
   const size = 40;
   objects.push({
     type: 'devil',
@@ -172,13 +211,50 @@ function spawnDevil() {
     y: -40,
     width: size,
     height: size,
-    speed: 100,
+    speed: fallSpeed * 0.7,
     latched: false,
     hammerTimer: 0,
     shakeProgress: 0,
     shakeRequired: 8,
     hammerAnimTimer: 0
   });
+}
+
+// --- Level Management ---
+function startLevel() {
+  const cfg = getLevelConfig(game.level);
+  game.levelConfig = cfg;
+  game.levelTimer = cfg.duration;
+  game.devilsSpawned = 0;
+  game.cracks = 0;
+  game.latchedDevil = null;
+
+  // Calculate devil spawn schedule: spread evenly, but not in first 5 seconds
+  game.devilSchedule = [];
+  if (cfg.devilCount > 0) {
+    const availableTime = cfg.duration - 5; // exclude first 5 seconds
+    const interval = availableTime / (cfg.devilCount + 1);
+    for (let i = 1; i <= cfg.devilCount; i++) {
+      // Time remaining when devil should spawn (counting down from duration)
+      const spawnAt = cfg.duration - (5 + interval * i);
+      game.devilSchedule.push(spawnAt);
+    }
+  }
+
+  // Clear everything
+  objects.length = 0;
+  ejectedCoins.length = 0;
+  spawnTimer = 0;
+  flashTimer = 0;
+  lastShakeKey = null;
+  squealTimer = 0;
+  successFlashTimer = 0;
+  shakeHintTimer = 0;
+  shakeVisualOffset = 0;
+  shakeVisualTimer = 0;
+  player.x = WIDTH / 2;
+
+  game.screen = 'playing';
 }
 
 // --- Input ---
@@ -206,25 +282,19 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
-  if (e.key === ' ' && (game.screen === 'title' || game.screen === 'gameOver')) {
-    game.screen = 'playing';
-    game.score = 0;
-    game.level = 1;
-    game.cracks = 0;
-    game.latchedDevil = null;
-    objects.length = 0;
-    spawnTimer = 0;
-    flashTimer = 0;
-    devilSpawnTimer = 0;
-    devilSpawnInterval = 15 + Math.random() * 5;
-    player.x = WIDTH / 2;
-    lastShakeKey = null;
-    ejectedCoins.length = 0;
-    squealTimer = 0;
-    successFlashTimer = 0;
-    shakeHintTimer = 0;
-    shakeVisualOffset = 0;
-    shakeVisualTimer = 0;
+  if (e.key === ' ') {
+    if (game.screen === 'title') {
+      game.score = 0;
+      game.level = 1;
+      startLevel();
+    } else if (game.screen === 'gameOver') {
+      game.score = 0;
+      game.level = 1;
+      game.screen = 'title';
+    } else if (game.screen === 'levelComplete') {
+      game.level++;
+      startLevel();
+    }
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -252,6 +322,29 @@ function triggerDamage() {
 }
 
 function update(dt) {
+  // Update title screen background coins
+  if (game.screen === 'title') {
+    titleCoinTimer += dt;
+    if (titleCoinTimer >= 0.5) {
+      titleCoinTimer -= 0.5;
+      const emojis = ['\u{1FA99}', '\u{1F4B5}', '\u{1F4B0}'];
+      titleCoins.push({
+        x: Math.random() * WIDTH,
+        y: -20,
+        emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        speed: 60 + Math.random() * 40,
+        alpha: 0.3 + Math.random() * 0.2
+      });
+    }
+    for (let i = titleCoins.length - 1; i >= 0; i--) {
+      titleCoins[i].y += titleCoins[i].speed * dt;
+      if (titleCoins[i].y > HEIGHT + 30) {
+        titleCoins.splice(i, 1);
+      }
+    }
+    return;
+  }
+
   if (game.screen !== 'playing') return;
 
   // Flash timer countdown
@@ -260,6 +353,25 @@ function update(dt) {
   if (shakeVisualTimer > 0) {
     shakeVisualTimer -= dt;
     if (shakeVisualTimer <= 0) shakeVisualOffset = 0;
+  }
+
+  // Level timer countdown
+  game.levelTimer -= dt;
+  if (game.levelTimer <= 0) {
+    game.levelTimer = 0;
+    // Level complete!
+    objects.length = 0;
+    ejectedCoins.length = 0;
+    // Remove latched devil without damage
+    if (game.latchedDevil) {
+      game.latchedDevil = null;
+      lastShakeKey = null;
+      squealTimer = 0;
+      shakeHintTimer = 0;
+    }
+    game.screen = 'levelComplete';
+    playLevelComplete();
+    return;
   }
 
   // Player movement
@@ -274,19 +386,23 @@ function update(dt) {
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
 
-  // Spawn timer (coins and bombs)
+  // Spawn timer (coins and bombs) using level config
+  const spawnRate = game.levelConfig ? game.levelConfig.spawnRate : 1.0;
   spawnTimer += dt;
-  if (spawnTimer >= SPAWN_INTERVAL) {
-    spawnTimer -= SPAWN_INTERVAL;
+  if (spawnTimer >= spawnRate) {
+    spawnTimer -= spawnRate;
     spawnObject();
   }
 
-  // Devil spawn timer
-  devilSpawnTimer += dt;
-  if (devilSpawnTimer >= devilSpawnInterval) {
-    devilSpawnTimer = 0;
-    devilSpawnInterval = 15 + Math.random() * 5;
-    spawnDevil();
+  // Devil spawn from schedule
+  if (game.devilSchedule.length > 0) {
+    // Check if levelTimer has passed the next scheduled devil time
+    const nextDevilTime = game.devilSchedule[0];
+    if (game.levelTimer <= nextDevilTime) {
+      game.devilSchedule.shift();
+      game.devilsSpawned++;
+      spawnDevil();
+    }
   }
 
   // Update latched devil
@@ -307,7 +423,6 @@ function update(dt) {
 
     // Shake success - eject coin to knock devil off
     if (devil.shakeProgress >= devil.shakeRequired) {
-      // Create ejected coin animation
       const flyDirection = (Math.random() < 0.5 ? -1 : 1);
       ejectedCoins.push({
         x: player.x,
@@ -315,7 +430,7 @@ function update(dt) {
         startY: player.y - 20,
         targetX: devil.x,
         targetY: devil.y,
-        phase: 'rising', // 'rising' then 'hit'
+        phase: 'rising',
         timer: 0,
         riseDuration: 0.25,
         devilFlyX: flyDirection * (200 + Math.random() * 150),
@@ -327,10 +442,7 @@ function update(dt) {
         hitTimer: 0
       });
 
-      // Score penalty
       game.score = Math.max(0, game.score - 3);
-
-      // Clean up
       game.latchedDevil = null;
       lastShakeKey = null;
       squealTimer = 0;
@@ -339,13 +451,11 @@ function update(dt) {
     }
   }
 
-  // Devil hammer timer expired - causes damage (check again in case shake didn't succeed)
+  // Devil hammer timer expired - causes damage
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
-    // Devil hammer timer expired - causes damage
     if (devil.hammerTimer >= 5.0) {
       triggerDamage();
-      // Add fly-away devil to objects for animation
       objects.push({
         type: 'devil',
         emoji: devil.emoji,
@@ -369,9 +479,8 @@ function update(dt) {
     const ec = ejectedCoins[i];
     ec.timer += dt;
     if (ec.phase === 'rising') {
-      // Coin rises from piggy toward devil position
       const t = Math.min(ec.timer / ec.riseDuration, 1.0);
-      ec.y = ec.startY + t * (ec.targetY - ec.startY); // lerp upward
+      ec.y = ec.startY + t * (ec.targetY - ec.startY);
       if (t >= 1.0) {
         ec.phase = 'hit';
         ec.hitTimer = 0;
@@ -380,7 +489,6 @@ function update(dt) {
       }
     } else if (ec.phase === 'hit') {
       ec.hitTimer += dt;
-      // Devil tumbles away
       ec.devilAngle += dt * 10;
       ec.hitX += ec.devilFlyX * dt;
       ec.hitY += ec.devilFlyY * dt;
@@ -413,7 +521,6 @@ function update(dt) {
         objects.splice(i, 1);
         continue;
       } else if (obj.type === 'devil') {
-        // Only latch if no devil currently latched
         if (!game.latchedDevil) {
           obj.latched = true;
           game.latchedDevil = {
@@ -431,7 +538,6 @@ function update(dt) {
           squealTimer = 0;
           shakeHintTimer = 0;
         }
-        // Remove from falling objects either way (bounced off or latched)
         objects.splice(i, 1);
         continue;
       } else {
@@ -459,22 +565,45 @@ function draw() {
     drawTitle();
   } else if (game.screen === 'playing') {
     drawPlaying();
+  } else if (game.screen === 'levelComplete') {
+    drawLevelComplete();
   } else if (game.screen === 'gameOver') {
     drawGameOver();
   }
 }
 
 function drawTitle() {
+  // Background falling coins
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.font = '28px sans-serif';
+  for (const coin of titleCoins) {
+    ctx.globalAlpha = coin.alpha;
+    ctx.fillText(coin.emoji, coin.x, coin.y);
+  }
+  ctx.globalAlpha = 1.0;
 
-  ctx.font = '48px sans-serif';
+  // Title
+  ctx.font = 'bold 52px sans-serif';
   ctx.fillStyle = '#2d2d2d';
-  ctx.fillText('\u{1F437} Kasica Prasica \u{1F437}', WIDTH / 2, HEIGHT / 2 - 30);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 4;
+  ctx.strokeText('\u{1F437} Kasica Prasica \u{1F437}', WIDTH / 2, HEIGHT / 2 - 50);
+  ctx.fillText('\u{1F437} Kasica Prasica \u{1F437}', WIDTH / 2, HEIGHT / 2 - 50);
 
-  ctx.font = '24px sans-serif';
-  ctx.fillStyle = '#444';
-  ctx.fillText('Press SPACE to start', WIDTH / 2, HEIGHT / 2 + 40);
+  // Serbian subtitle
+  ctx.font = '22px sans-serif';
+  ctx.fillStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.fillText('Hvataj nov\u010di\u0107e! Izbegavaj bombe!', WIDTH / 2, HEIGHT / 2 + 10);
+
+  // Start prompt (pulsing)
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillStyle = '#333';
+  ctx.fillText('Press SPACE to start', WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.globalAlpha = 1.0;
 }
 
 function drawPlaying() {
@@ -507,7 +636,7 @@ function drawPlaying() {
     ctx.font = '36px sans-serif';
     ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
 
-    // Hammer animation: alternate left/right every 0.3s
+    // Hammer animation
     const hammerSide = Math.floor(devil.hammerAnimTimer / 0.3) % 2 === 0 ? -1 : 1;
     ctx.font = '24px sans-serif';
     ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
@@ -519,11 +648,9 @@ function drawPlaying() {
     const barY = player.y - 80;
     const fill = Math.min(devil.hammerTimer / 5.0, 1.0);
 
-    // Bar background
     ctx.fillStyle = '#333';
     ctx.fillRect(barX, barY, barWidth, barHeight);
 
-    // Bar fill (red)
     let barAlpha = 1.0;
     if (fill > 0.8) {
       barAlpha = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 100));
@@ -533,29 +660,23 @@ function drawPlaying() {
     ctx.fillRect(barX, barY, barWidth * fill, barHeight);
     ctx.globalAlpha = 1.0;
 
-    // Bar border
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
-    // Shake progress bar (green) below danger bar
+    // Shake progress bar (green)
     const shakeBarY = barY + barHeight + 3;
     const shakeFill = Math.min(devil.shakeProgress / devil.shakeRequired, 1.0);
 
-    // Bar background
     ctx.fillStyle = '#333';
     ctx.fillRect(barX, shakeBarY, barWidth, barHeight);
-
-    // Bar fill (green)
     ctx.fillStyle = '#44ff44';
     ctx.fillRect(barX, shakeBarY, barWidth * shakeFill, barHeight);
-
-    // Bar border
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, shakeBarY, barWidth, barHeight);
 
-    // Shake hint text - pulsing
+    // Shake hint text
     const hintAlpha = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 200));
     ctx.globalAlpha = hintAlpha;
     ctx.font = 'bold 18px sans-serif';
@@ -577,7 +698,6 @@ function drawPlaying() {
       ctx.textBaseline = 'middle';
       ctx.fillText('\u{1FA99}', ec.x, ec.y);
     } else if (ec.phase === 'hit') {
-      // Draw tumbling devil flying away
       ctx.save();
       ctx.translate(ec.hitX, ec.hitY);
       ctx.rotate(ec.devilAngle);
@@ -599,15 +719,56 @@ function drawPlaying() {
     ctx.globalAlpha = 1.0;
   }
 
-  // Score HUD
+  // --- HUD ---
+  // Top-left: Score
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.font = '24px sans-serif';
+  ctx.font = 'bold 24px sans-serif';
   ctx.fillStyle = '#2d2d2d';
   ctx.fillText('\u{1FA99} Score: ' + game.score, 15, 15);
 
-  // Crack indicator (top-right)
+  // Top-center: Level + timer bar
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillStyle = '#2d2d2d';
+  ctx.fillText('Level ' + game.level, WIDTH / 2, 12);
+
+  // Timer bar below level text
+  if (game.levelConfig) {
+    const timerBarWidth = 160;
+    const timerBarHeight = 10;
+    const timerBarX = WIDTH / 2 - timerBarWidth / 2;
+    const timerBarY = 38;
+    const timerFill = Math.max(0, game.levelTimer / game.levelConfig.duration);
+
+    // Background
+    ctx.fillStyle = '#333';
+    ctx.fillRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight);
+
+    // Fill - color shifts from green to yellow to red
+    let barColor;
+    if (timerFill > 0.5) barColor = '#44cc44';
+    else if (timerFill > 0.2) barColor = '#cccc44';
+    else barColor = '#cc4444';
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(timerBarX, timerBarY, timerBarWidth * timerFill, timerBarHeight);
+
+    // Border
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight);
+
+    // Time remaining text
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = '#555';
+    ctx.fillText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, 52);
+  }
+
+  // Top-right: Crack indicator
   ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.font = '24px sans-serif';
   let crackText = '\u{1F437}';
   for (let i = 0; i < game.cracks; i++) {
     crackText += '\u{1F494}';
@@ -623,21 +784,66 @@ function drawPlaying() {
   }
 }
 
+function drawLevelComplete() {
+  // Celebratory background
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Sparkle effect
+  const sparkleCount = 12;
+  ctx.font = '20px sans-serif';
+  for (let i = 0; i < sparkleCount; i++) {
+    const angle = (Date.now() / 1000 + i * (Math.PI * 2 / sparkleCount));
+    const radius = 120 + Math.sin(Date.now() / 300 + i) * 30;
+    const sx = WIDTH / 2 + Math.cos(angle) * radius;
+    const sy = HEIGHT / 2 - 30 + Math.sin(angle) * radius * 0.5;
+    ctx.globalAlpha = 0.4 + 0.3 * Math.sin(Date.now() / 200 + i);
+    ctx.fillText('\u2728', sx, sy);
+  }
+  ctx.globalAlpha = 1.0;
+
+  ctx.font = 'bold 48px sans-serif';
+  ctx.fillStyle = '#2d2d2d';
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.strokeText('Level ' + game.level + ' Complete! \u2728', WIDTH / 2, HEIGHT / 2 - 50);
+  ctx.fillText('Level ' + game.level + ' Complete! \u2728', WIDTH / 2, HEIGHT / 2 - 50);
+  ctx.lineWidth = 1;
+
+  ctx.font = '32px sans-serif';
+  ctx.fillStyle = '#444';
+  ctx.fillText('\u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT / 2 + 10);
+
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillStyle = '#333';
+  ctx.fillText('Press SPACE for Level ' + (game.level + 1), WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.globalAlpha = 1.0;
+}
+
 function drawGameOver() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.font = '48px sans-serif';
+  ctx.font = 'bold 48px sans-serif';
   ctx.fillStyle = '#2d2d2d';
-  ctx.fillText('\u{1F494} Game Over! \u{1F494}', WIDTH / 2, HEIGHT / 2 - 50);
+  ctx.fillText('\u{1F494} Game Over! \u{1F494}', WIDTH / 2, HEIGHT / 2 - 60);
+
+  ctx.font = '28px sans-serif';
+  ctx.fillStyle = '#444';
+  ctx.fillText('Level: ' + game.level, WIDTH / 2, HEIGHT / 2);
 
   ctx.font = '32px sans-serif';
   ctx.fillStyle = '#444';
-  ctx.fillText('\u{1FA99} Final Score: ' + game.score, WIDTH / 2, HEIGHT / 2 + 10);
+  ctx.fillText('\u{1FA99} Final Score: ' + game.score, WIDTH / 2, HEIGHT / 2 + 40);
 
-  ctx.font = '24px sans-serif';
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold 24px sans-serif';
   ctx.fillStyle = '#666';
-  ctx.fillText('Press SPACE to restart', WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.fillText('Press SPACE to play again', WIDTH / 2, HEIGHT / 2 + 90);
+  ctx.globalAlpha = 1.0;
 }
 
 // --- Game Loop ---
