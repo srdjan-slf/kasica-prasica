@@ -65,6 +65,52 @@ let spawnTimer = 0;
 const SPAWN_INTERVAL = 1.0;
 let flashTimer = 0;
 
+// --- Shake Mechanic ---
+let lastShakeKey = null;
+let shakeVisualOffset = 0;
+let shakeVisualTimer = 0;
+const ejectedCoins = [];
+let squealTimer = 0;
+let successFlashTimer = 0;
+let shakeHintTimer = 0;
+
+// --- Audio ---
+let audioCtx = null;
+function getAudioContext() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playSqueal() {
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(800, ctx.currentTime);
+  osc.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.15);
+  gain.gain.setValueAtTime(0.15, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.15);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.15);
+}
+
+function playShakeSound() {
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(400, ctx.currentTime);
+  osc.frequency.linearRampToValueAtTime(600, ctx.currentTime + 0.05);
+  gain.gain.setValueAtTime(0.1, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.05);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.05);
+}
+
 // --- Devil Enemies ---
 let devilSpawnTimer = 0;
 let devilSpawnInterval = 15 + Math.random() * 5; // 15-20 seconds
@@ -143,6 +189,23 @@ window.addEventListener('keydown', (e) => {
   }
   keys[e.key] = true;
 
+  // Shake detection when devil is latched
+  if (game.latchedDevil && game.screen === 'playing') {
+    if (e.key === 'ArrowUp' && lastShakeKey !== 'up') {
+      game.latchedDevil.shakeProgress++;
+      lastShakeKey = 'up';
+      shakeVisualOffset = -5;
+      shakeVisualTimer = 0.08;
+      playShakeSound();
+    } else if (e.key === 'ArrowDown' && lastShakeKey !== 'down') {
+      game.latchedDevil.shakeProgress++;
+      lastShakeKey = 'down';
+      shakeVisualOffset = 5;
+      shakeVisualTimer = 0.08;
+      playShakeSound();
+    }
+  }
+
   if (e.key === ' ' && (game.screen === 'title' || game.screen === 'gameOver')) {
     game.screen = 'playing';
     game.score = 0;
@@ -155,6 +218,13 @@ window.addEventListener('keydown', (e) => {
     devilSpawnTimer = 0;
     devilSpawnInterval = 15 + Math.random() * 5;
     player.x = WIDTH / 2;
+    lastShakeKey = null;
+    ejectedCoins.length = 0;
+    squealTimer = 0;
+    successFlashTimer = 0;
+    shakeHintTimer = 0;
+    shakeVisualOffset = 0;
+    shakeVisualTimer = 0;
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -186,6 +256,11 @@ function update(dt) {
 
   // Flash timer countdown
   if (flashTimer > 0) flashTimer -= dt;
+  if (successFlashTimer > 0) successFlashTimer -= dt;
+  if (shakeVisualTimer > 0) {
+    shakeVisualTimer -= dt;
+    if (shakeVisualTimer <= 0) shakeVisualOffset = 0;
+  }
 
   // Player movement
   if (keys['ArrowLeft']) {
@@ -221,7 +296,52 @@ function update(dt) {
     devil.y = player.y - 45;
     devil.hammerTimer += dt;
     devil.hammerAnimTimer += dt;
+    shakeHintTimer += dt;
 
+    // Squeal timer
+    squealTimer += dt;
+    if (squealTimer >= 0.8) {
+      squealTimer -= 0.8;
+      playSqueal();
+    }
+
+    // Shake success - eject coin to knock devil off
+    if (devil.shakeProgress >= devil.shakeRequired) {
+      // Create ejected coin animation
+      const flyDirection = (Math.random() < 0.5 ? -1 : 1);
+      ejectedCoins.push({
+        x: player.x,
+        y: player.y - 20,
+        startY: player.y - 20,
+        targetX: devil.x,
+        targetY: devil.y,
+        phase: 'rising', // 'rising' then 'hit'
+        timer: 0,
+        riseDuration: 0.25,
+        devilFlyX: flyDirection * (200 + Math.random() * 150),
+        devilFlyY: -(200 + Math.random() * 100),
+        devilEmoji: devil.emoji,
+        devilW: devil.width,
+        devilH: devil.height,
+        devilAngle: 0,
+        hitTimer: 0
+      });
+
+      // Score penalty
+      game.score = Math.max(0, game.score - 3);
+
+      // Clean up
+      game.latchedDevil = null;
+      lastShakeKey = null;
+      squealTimer = 0;
+      shakeHintTimer = 0;
+      successFlashTimer = 0.4;
+    }
+  }
+
+  // Devil hammer timer expired - causes damage (check again in case shake didn't succeed)
+  if (game.latchedDevil) {
+    const devil = game.latchedDevil;
     // Devil hammer timer expired - causes damage
     if (devil.hammerTimer >= 5.0) {
       triggerDamage();
@@ -238,6 +358,35 @@ function update(dt) {
         flyAwayTimer: 0.5
       });
       game.latchedDevil = null;
+      lastShakeKey = null;
+      squealTimer = 0;
+      shakeHintTimer = 0;
+    }
+  }
+
+  // Update ejected coin animations
+  for (let i = ejectedCoins.length - 1; i >= 0; i--) {
+    const ec = ejectedCoins[i];
+    ec.timer += dt;
+    if (ec.phase === 'rising') {
+      // Coin rises from piggy toward devil position
+      const t = Math.min(ec.timer / ec.riseDuration, 1.0);
+      ec.y = ec.startY + t * (ec.targetY - ec.startY); // lerp upward
+      if (t >= 1.0) {
+        ec.phase = 'hit';
+        ec.hitTimer = 0;
+        ec.hitX = ec.x;
+        ec.hitY = ec.targetY;
+      }
+    } else if (ec.phase === 'hit') {
+      ec.hitTimer += dt;
+      // Devil tumbles away
+      ec.devilAngle += dt * 10;
+      ec.hitX += ec.devilFlyX * dt;
+      ec.hitY += ec.devilFlyY * dt;
+      if (ec.hitTimer > 0.6) {
+        ejectedCoins.splice(i, 1);
+      }
     }
   }
 
@@ -278,6 +427,9 @@ function update(dt) {
             shakeRequired: 8,
             hammerAnimTimer: 0
           };
+          lastShakeKey = null;
+          squealTimer = 0;
+          shakeHintTimer = 0;
         }
         // Remove from falling objects either way (bounced off or latched)
         objects.splice(i, 1);
@@ -345,26 +497,26 @@ function drawPlaying() {
     ctx.fillText(obj.emoji, obj.x, obj.y);
   }
 
-  // Player
+  // Player (with shake visual offset)
   ctx.font = '48px sans-serif';
-  ctx.fillText(player.emoji, player.x, player.y);
+  ctx.fillText(player.emoji, player.x, player.y + shakeVisualOffset);
 
   // Latched devil on top of player
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
     ctx.font = '36px sans-serif';
-    ctx.fillText(devil.emoji, devil.x, devil.y);
+    ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
 
     // Hammer animation: alternate left/right every 0.3s
     const hammerSide = Math.floor(devil.hammerAnimTimer / 0.3) % 2 === 0 ? -1 : 1;
     ctx.font = '24px sans-serif';
-    ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15);
+    ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
 
-    // Danger bar above the piggy
+    // Danger bar (red) above the piggy
     const barWidth = 60;
     const barHeight = 8;
     const barX = player.x - barWidth / 2;
-    const barY = player.y - 75;
+    const barY = player.y - 80;
     const fill = Math.min(devil.hammerTimer / 5.0, 1.0);
 
     // Bar background
@@ -374,7 +526,6 @@ function drawPlaying() {
     // Bar fill (red)
     let barAlpha = 1.0;
     if (fill > 0.8) {
-      // Pulse when >80%
       barAlpha = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 100));
     }
     ctx.globalAlpha = barAlpha;
@@ -386,6 +537,66 @@ function drawPlaying() {
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+    // Shake progress bar (green) below danger bar
+    const shakeBarY = barY + barHeight + 3;
+    const shakeFill = Math.min(devil.shakeProgress / devil.shakeRequired, 1.0);
+
+    // Bar background
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, shakeBarY, barWidth, barHeight);
+
+    // Bar fill (green)
+    ctx.fillStyle = '#44ff44';
+    ctx.fillRect(barX, shakeBarY, barWidth * shakeFill, barHeight);
+
+    // Bar border
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, shakeBarY, barWidth, barHeight);
+
+    // Shake hint text - pulsing
+    const hintAlpha = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 200));
+    ctx.globalAlpha = hintAlpha;
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffff00';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText('\u2B06\u2B07 SHAKE!', player.x, player.y - 95);
+    ctx.fillText('\u2B06\u2B07 SHAKE!', player.x, player.y - 95);
+    ctx.globalAlpha = 1.0;
+    ctx.lineWidth = 1;
+  }
+
+  // Ejected coin animations
+  for (const ec of ejectedCoins) {
+    if (ec.phase === 'rising') {
+      ctx.font = '28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\u{1FA99}', ec.x, ec.y);
+    } else if (ec.phase === 'hit') {
+      // Draw tumbling devil flying away
+      ctx.save();
+      ctx.translate(ec.hitX, ec.hitY);
+      ctx.rotate(ec.devilAngle);
+      ctx.font = '36px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = Math.max(0, 1.0 - ec.hitTimer / 0.6);
+      ctx.fillText(ec.devilEmoji, 0, 0);
+      ctx.restore();
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  // Success flash (green)
+  if (successFlashTimer > 0) {
+    ctx.globalAlpha = successFlashTimer / 0.4 * 0.25;
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.globalAlpha = 1.0;
   }
 
   // Score HUD
