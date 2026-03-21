@@ -299,64 +299,112 @@ function getAudioContext() {
 }
 
 function playSqueal() {
-  const ctx = getAudioContext();
-  const t = ctx.currentTime;
+  try {
+  const actx = getAudioContext();
+  const t = actx.currentTime;
+  const duration = 0.5;
 
-  // Main high-pitched scream - like a pig being slaughtered!
-  const osc1 = ctx.createOscillator();
-  const gain1 = ctx.createGain();
+  // Layer 1: Main vocal scream - starts at 600Hz, sweeps to 1500Hz
+  const osc1 = actx.createOscillator();
   osc1.type = 'sawtooth';
-  osc1.frequency.setValueAtTime(900, t);
-  osc1.frequency.linearRampToValueAtTime(1800, t + 0.05);
-  osc1.frequency.linearRampToValueAtTime(1200, t + 0.15);
-  osc1.frequency.linearRampToValueAtTime(2000, t + 0.25);
-  osc1.frequency.linearRampToValueAtTime(800, t + 0.4);
-  gain1.gain.setValueAtTime(0.3, t);
-  gain1.gain.linearRampToValueAtTime(0.4, t + 0.1);
-  gain1.gain.linearRampToValueAtTime(0.25, t + 0.3);
-  gain1.gain.linearRampToValueAtTime(0, t + 0.45);
-  osc1.connect(gain1);
-  gain1.connect(ctx.destination);
+  osc1.frequency.setValueAtTime(600, t);
+  osc1.frequency.linearRampToValueAtTime(1500, t + 0.08);
+  osc1.frequency.linearRampToValueAtTime(1200, t + 0.2);
+  osc1.frequency.linearRampToValueAtTime(1800, t + 0.35);
+  osc1.frequency.linearRampToValueAtTime(700, t + duration);
+
+  // Formant filter for vocal/animal quality
+  const formant1 = actx.createBiquadFilter();
+  formant1.type = 'bandpass';
+  formant1.frequency.value = 1200;
+  formant1.Q.value = 4;
+
+  // Amplitude tremolo (fast volume oscillation for screaming quality)
+  const tremolo = actx.createOscillator();
+  tremolo.frequency.value = 25;
+  const tremoloGain = actx.createGain();
+  tremoloGain.gain.value = 0.15;
+  tremolo.connect(tremoloGain);
+
+  const gain1 = actx.createGain();
+  gain1.gain.setValueAtTime(0, t);
+  gain1.gain.linearRampToValueAtTime(0.35, t + 0.02);
+  gain1.gain.setValueAtTime(0.35, t + 0.15);
+  gain1.gain.linearRampToValueAtTime(0.2, t + 0.35);
+  gain1.gain.linearRampToValueAtTime(0, t + duration);
+  tremoloGain.connect(gain1.gain);
+
+  osc1.connect(formant1);
+  formant1.connect(gain1);
+  gain1.connect(actx.destination);
   osc1.start(t);
-  osc1.stop(t + 0.45);
+  osc1.stop(t + duration);
+  tremolo.start(t);
+  tremolo.stop(t + duration);
 
-  // Second oscillator for harmonic screech
-  const osc2 = ctx.createOscillator();
-  const gain2 = ctx.createGain();
+  // Layer 2: Higher harmonic for piercing screech
+  const osc2 = actx.createOscillator();
   osc2.type = 'square';
-  osc2.frequency.setValueAtTime(1400, t);
-  osc2.frequency.linearRampToValueAtTime(2200, t + 0.08);
-  osc2.frequency.linearRampToValueAtTime(1600, t + 0.2);
-  osc2.frequency.linearRampToValueAtTime(2400, t + 0.35);
-  gain2.gain.setValueAtTime(0.15, t);
-  gain2.gain.linearRampToValueAtTime(0.2, t + 0.1);
-  gain2.gain.linearRampToValueAtTime(0, t + 0.4);
-  osc2.connect(gain2);
-  gain2.connect(ctx.destination);
-  osc2.start(t);
-  osc2.stop(t + 0.4);
+  osc2.frequency.setValueAtTime(1200, t);
+  osc2.frequency.linearRampToValueAtTime(2400, t + 0.06);
+  osc2.frequency.linearRampToValueAtTime(1800, t + 0.2);
+  osc2.frequency.linearRampToValueAtTime(2800, t + 0.4);
+  osc2.frequency.linearRampToValueAtTime(1000, t + duration);
 
-  // Noise burst for texture (breathy squeal)
-  const bufferSize = ctx.sampleRate * 0.3;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const formant2 = actx.createBiquadFilter();
+  formant2.type = 'bandpass';
+  formant2.frequency.value = 2200;
+  formant2.Q.value = 3;
+
+  const gain2 = actx.createGain();
+  gain2.gain.setValueAtTime(0, t);
+  gain2.gain.linearRampToValueAtTime(0.18, t + 0.03);
+  gain2.gain.linearRampToValueAtTime(0.12, t + 0.3);
+  gain2.gain.linearRampToValueAtTime(0, t + duration);
+
+  osc2.connect(formant2);
+  formant2.connect(gain2);
+  gain2.connect(actx.destination);
+  osc2.start(t);
+  osc2.stop(t + duration);
+
+  // Layer 3: Sub-harmonic growl underneath
+  const osc3 = actx.createOscillator();
+  osc3.type = 'sawtooth';
+  osc3.frequency.setValueAtTime(300, t);
+  osc3.frequency.linearRampToValueAtTime(500, t + 0.1);
+  osc3.frequency.linearRampToValueAtTime(350, t + duration);
+  const gain3 = actx.createGain();
+  gain3.gain.setValueAtTime(0.1, t);
+  gain3.gain.linearRampToValueAtTime(0.05, t + 0.3);
+  gain3.gain.linearRampToValueAtTime(0, t + duration);
+  osc3.connect(gain3);
+  gain3.connect(actx.destination);
+  osc3.start(t);
+  osc3.stop(t + duration);
+
+  // Noise burst for breathy texture
+  const bufferSize = actx.sampleRate * 0.4;
+  const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < bufferSize; i++) {
     data[i] = (Math.random() * 2 - 1) * 0.3;
   }
-  const noise = ctx.createBufferSource();
+  const noise = actx.createBufferSource();
   noise.buffer = buffer;
-  const noiseGain = ctx.createGain();
-  noiseGain.gain.setValueAtTime(0.08, t);
-  noiseGain.gain.linearRampToValueAtTime(0, t + 0.3);
-  // High-pass filter to make noise sound like a screech
-  const hpFilter = ctx.createBiquadFilter();
+  const hpFilter = actx.createBiquadFilter();
   hpFilter.type = 'highpass';
-  hpFilter.frequency.value = 2000;
+  hpFilter.frequency.value = 2500;
+  const noiseGain = actx.createGain();
+  noiseGain.gain.setValueAtTime(0.1, t);
+  noiseGain.gain.linearRampToValueAtTime(0.05, t + 0.2);
+  noiseGain.gain.linearRampToValueAtTime(0, t + 0.4);
   noise.connect(hpFilter);
   hpFilter.connect(noiseGain);
-  noiseGain.connect(ctx.destination);
+  noiseGain.connect(actx.destination);
   noise.start(t);
-  noise.stop(t + 0.3);
+  noise.stop(t + 0.4);
+  } catch (e) {}
 }
 
 function playShakeSound() {
@@ -534,6 +582,239 @@ function playGameOver() {
   });
 }
 
+// --- Background Music System ---
+let musicPlaying = false;
+let musicNodes = null;
+let beatCount = 0;
+let beatTimer = 0;
+const BPM = 140;
+const BEAT_DURATION = 60 / BPM;
+let musicLoopTimeout = null;
+
+function playOink(delay) {
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime + (delay || 0);
+    const duration = 0.25;
+
+    // Main vocal - sawtooth for richness
+    const voice = actx.createOscillator();
+    voice.type = 'sawtooth';
+    voice.frequency.setValueAtTime(180, t);
+    voice.frequency.linearRampToValueAtTime(280, t + 0.06);
+    voice.frequency.linearRampToValueAtTime(200, t + 0.15);
+    voice.frequency.linearRampToValueAtTime(150, t + duration);
+
+    // Vibrato for organic feel
+    const vibrato = actx.createOscillator();
+    vibrato.frequency.value = 6;
+    const vibratoGain = actx.createGain();
+    vibratoGain.gain.value = 15;
+    vibrato.connect(vibratoGain);
+    vibratoGain.connect(voice.frequency);
+
+    // Nasal resonance filter
+    const nasal = actx.createBiquadFilter();
+    nasal.type = 'bandpass';
+    nasal.frequency.value = 1000;
+    nasal.Q.value = 3;
+
+    // Envelope
+    const env = actx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(0.25, t + 0.02);
+    env.gain.setValueAtTime(0.25, t + 0.08);
+    env.gain.linearRampToValueAtTime(0, t + duration);
+
+    // Oink master gain (louder than music)
+    const oinkMaster = actx.createGain();
+    oinkMaster.gain.value = 0.5;
+
+    voice.connect(nasal);
+    nasal.connect(env);
+    env.connect(oinkMaster);
+    oinkMaster.connect(actx.destination);
+    vibrato.start(t);
+    voice.start(t);
+    voice.stop(t + duration);
+    vibrato.stop(t + duration);
+  } catch (e) {}
+}
+
+function playDoubleOink() {
+  playOink(0);
+  playOink(0.18);
+}
+
+function startMusic() {
+  if (musicPlaying) return;
+  musicPlaying = true;
+  beatCount = 0;
+  beatTimer = 0;
+  scheduleMusicalBar();
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  if (musicLoopTimeout) {
+    clearTimeout(musicLoopTimeout);
+    musicLoopTimeout = null;
+  }
+  if (musicNodes) {
+    musicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
+    musicNodes = null;
+  }
+}
+
+function scheduleMusicalBar() {
+  if (!musicPlaying) return;
+  try {
+    const actx = getAudioContext();
+    const now = actx.currentTime;
+    const nodes = [];
+    const masterGain = actx.createGain();
+    masterGain.gain.value = 0.12;
+    masterGain.connect(actx.destination);
+
+    const beatLen = BEAT_DURATION;
+    const barLen = beatLen * 4;
+    const totalBars = 4;
+    const totalDuration = barLen * totalBars;
+
+    // --- Bass line (square wave, low) ---
+    // 4 bars: C2-C2-Eb2-G2 | Ab1-Ab1-G1-F1 | C2-C2-Eb2-G2 | Ab1-Ab1-G1-F1
+    const bassNotes = [
+      65.41, 65.41, 77.78, 98.00,
+      51.91, 51.91, 49.00, 43.65,
+      65.41, 65.41, 77.78, 98.00,
+      51.91, 51.91, 49.00, 43.65
+    ];
+    const bassOsc = actx.createOscillator();
+    bassOsc.type = 'square';
+    const bassGain = actx.createGain();
+    bassGain.gain.value = 0.35;
+    bassOsc.connect(bassGain);
+    bassGain.connect(masterGain);
+    for (let i = 0; i < bassNotes.length; i++) {
+      const t = now + i * beatLen;
+      bassOsc.frequency.setValueAtTime(bassNotes[i], t);
+    }
+    bassOsc.start(now);
+    bassOsc.stop(now + totalDuration);
+    nodes.push(bassOsc);
+
+    // --- Melody (triangle wave, higher octave) ---
+    // 8th notes = beatLen/2, 32 notes total for 4 bars
+    const melodyNotes = [
+      // Bar 1: C4-Eb4-G4-C5 ascending playful
+      261.6, 311.1, 392.0, 523.3, 392.0, 311.1, 261.6, 311.1,
+      // Bar 2: Bb3-G3-Eb4-C4
+      233.1, 196.0, 311.1, 261.6, 311.1, 392.0, 523.3, 392.0,
+      // Bar 3: Ab3-Bb3-C4-Eb4
+      207.7, 233.1, 261.6, 311.1, 392.0, 523.3, 392.0, 311.1,
+      // Bar 4: G3-Eb3-C4-G3 resolution
+      196.0, 155.6, 261.6, 196.0, 261.6, 311.1, 261.6, 196.0
+    ];
+    const melOsc = actx.createOscillator();
+    melOsc.type = 'triangle';
+    const melGain = actx.createGain();
+    melGain.gain.value = 0.25;
+    melOsc.connect(melGain);
+    melGain.connect(masterGain);
+    const eighthNote = beatLen / 2;
+    for (let i = 0; i < melodyNotes.length; i++) {
+      const t = now + i * eighthNote;
+      melOsc.frequency.setValueAtTime(melodyNotes[i], t);
+      // Add slight volume pulse per note for bounce
+      melGain.gain.setValueAtTime(0.25, t);
+      melGain.gain.linearRampToValueAtTime(0.15, t + eighthNote * 0.8);
+    }
+    melOsc.start(now);
+    melOsc.stop(now + totalDuration);
+    nodes.push(melOsc);
+
+    // --- Percussion ---
+    // Kick on beats 1,3 - low noise burst
+    // Snare on beats 2,4 - mid noise burst
+    // Hi-hat on every beat - high noise short
+    for (let bar = 0; bar < totalBars; bar++) {
+      for (let beat = 0; beat < 4; beat++) {
+        const t = now + (bar * 4 + beat) * beatLen;
+
+        // Hi-hat (every beat)
+        const hhBuf = actx.createBuffer(1, actx.sampleRate * 0.03, actx.sampleRate);
+        const hhData = hhBuf.getChannelData(0);
+        for (let s = 0; s < hhData.length; s++) hhData[s] = (Math.random() * 2 - 1) * (1 - s / hhData.length);
+        const hh = actx.createBufferSource();
+        hh.buffer = hhBuf;
+        const hhFilter = actx.createBiquadFilter();
+        hhFilter.type = 'highpass';
+        hhFilter.frequency.value = 7000;
+        const hhGain = actx.createGain();
+        hhGain.gain.setValueAtTime(0.6, t);
+        hhGain.gain.linearRampToValueAtTime(0, t + 0.03);
+        hh.connect(hhFilter);
+        hhFilter.connect(hhGain);
+        hhGain.connect(masterGain);
+        hh.start(t);
+        hh.stop(t + 0.03);
+        nodes.push(hh);
+
+        if (beat === 0 || beat === 2) {
+          // Kick
+          const kickOsc = actx.createOscillator();
+          kickOsc.type = 'sine';
+          kickOsc.frequency.setValueAtTime(150, t);
+          kickOsc.frequency.linearRampToValueAtTime(40, t + 0.1);
+          const kickGain = actx.createGain();
+          kickGain.gain.setValueAtTime(0.7, t);
+          kickGain.gain.linearRampToValueAtTime(0, t + 0.1);
+          kickOsc.connect(kickGain);
+          kickGain.connect(masterGain);
+          kickOsc.start(t);
+          kickOsc.stop(t + 0.1);
+          nodes.push(kickOsc);
+        }
+
+        if (beat === 1 || beat === 3) {
+          // Snare
+          const snBuf = actx.createBuffer(1, actx.sampleRate * 0.08, actx.sampleRate);
+          const snData = snBuf.getChannelData(0);
+          for (let s = 0; s < snData.length; s++) snData[s] = (Math.random() * 2 - 1) * (1 - s / snData.length);
+          const sn = actx.createBufferSource();
+          sn.buffer = snBuf;
+          const snFilter = actx.createBiquadFilter();
+          snFilter.type = 'bandpass';
+          snFilter.frequency.value = 3000;
+          snFilter.Q.value = 1;
+          const snGain = actx.createGain();
+          snGain.gain.setValueAtTime(0.5, t);
+          snGain.gain.linearRampToValueAtTime(0, t + 0.08);
+          sn.connect(snFilter);
+          snFilter.connect(snGain);
+          snGain.connect(masterGain);
+          sn.start(t);
+          sn.stop(t + 0.08);
+          nodes.push(sn);
+        }
+      }
+    }
+
+    // Store nodes so we can stop them
+    if (musicNodes) {
+      musicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
+    }
+    musicNodes = nodes;
+
+    // Schedule next bar slightly before current ends
+    const scheduleAhead = totalDuration * 1000 - 100;
+    musicLoopTimeout = setTimeout(() => {
+      if (musicPlaying) scheduleMusicalBar();
+    }, scheduleAhead);
+
+  } catch (e) {}
+}
+
 // --- Coin Types ---
 const COIN_TYPES = [
   { emoji: '\u{1FA99}', value: 1, weight: 60 },
@@ -667,6 +948,7 @@ function startLevel() {
   player.x = WIDTH / 2;
 
   game.screen = 'playing';
+  startMusic();
 }
 
 // --- Input ---
@@ -696,6 +978,7 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === ' ') {
     if (game.screen === 'title') {
+      playOink();
       game.score = 0;
       game.level = 1;
       startLevel();
@@ -743,6 +1026,7 @@ function triggerDamage(fromBomb) {
 
   if (game.cracks >= 3) {
     game.screen = 'gameOver';
+    stopMusic();
     playGameOver();
   }
 }
@@ -785,6 +1069,20 @@ function update(dt) {
   // Piggy bob timer
   piggyBobTimer += dt;
 
+  // Beat tracking for music oinks
+  if (musicPlaying) {
+    beatTimer += dt;
+    if (beatTimer >= BEAT_DURATION) {
+      beatTimer -= BEAT_DURATION;
+      beatCount++;
+      if (beatCount % 8 === 0) {
+        playDoubleOink();
+      } else if (beatCount % 4 === 0) {
+        playOink();
+      }
+    }
+  }
+
   // Flash timer countdown
   if (flashTimer > 0) flashTimer -= dt;
   if (successFlashTimer > 0) successFlashTimer -= dt;
@@ -818,6 +1116,7 @@ function update(dt) {
       devilTypeIndicator = null;
     }
     game.screen = 'levelComplete';
+    stopMusic();
     playLevelComplete();
     // Level complete confetti particles
     const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
