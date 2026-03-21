@@ -293,10 +293,28 @@ let titleCoinTimer = 0;
 
 // --- Audio ---
 let audioCtx = null;
+let audioUnlocked = false;
 function getAudioContext() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
+// Unlock audio on ANY user interaction (click, touch, key)
+function unlockAudio() {
+  if (audioUnlocked) return;
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') ctx.resume();
+  // Play a silent buffer to fully unlock
+  const buf = ctx.createBuffer(1, 1, 22050);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start(0);
+  audioUnlocked = true;
+}
+document.addEventListener('click', unlockAudio);
+document.addEventListener('touchstart', unlockAudio);
+document.addEventListener('keydown', unlockAudio, { once: false });
 
 function playSqueal() {
   try {
@@ -992,6 +1010,25 @@ window.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// Click/touch on canvas also starts/restarts game (and unlocks audio!)
+canvas.addEventListener('click', () => {
+  unlockAudio();
+  if (game.screen === 'title') {
+    playOink();
+    game.score = 0;
+    game.level = 1;
+    startLevel();
+  } else if (game.screen === 'gameOver') {
+    game.score = 0;
+    game.level = 1;
+    game.screen = 'title';
+  } else if (game.screen === 'levelComplete') {
+    game.level++;
+    startLevel();
+  }
+});
+
 window.addEventListener('keyup', (e) => {
   keys[e.key] = false;
 });
@@ -1621,7 +1658,7 @@ function drawTitle() {
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 26px sans-serif';
   ctx.fillStyle = '#333';
-  ctx.fillText('Press SPACE to start', WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.fillText('Klikni ili pritisni SPACE', WIDTH / 2, HEIGHT / 2 + 60);
   ctx.globalAlpha = 1.0;
 }
 
@@ -1835,7 +1872,7 @@ function drawLevelComplete() {
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 24px sans-serif';
   ctx.fillStyle = '#333';
-  ctx.fillText('Press SPACE for Level ' + (game.level + 1), WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.fillText('Klikni za Level ' + (game.level + 1), WIDTH / 2, HEIGHT / 2 + 60);
   ctx.globalAlpha = 1.0;
 }
 
@@ -1859,7 +1896,7 @@ function drawGameOver() {
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 24px sans-serif';
   ctx.fillStyle = '#666';
-  ctx.fillText('Press SPACE to play again', WIDTH / 2, HEIGHT / 2 + 90);
+  ctx.fillText('Klikni za novu igru', WIDTH / 2, HEIGHT / 2 + 90);
   ctx.globalAlpha = 1.0;
 }
 
