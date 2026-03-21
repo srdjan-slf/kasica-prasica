@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kasica Prasica</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const WIDTH = 800;
+const HEIGHT = 600;
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = WIDTH;
+canvas.height = HEIGHT;
+
+function resizeCanvas() {
+  const scaleX = window.innerWidth / WIDTH;
+  const scaleY = window.innerHeight / HEIGHT;
+  const scale = Math.min(scaleX, scaleY);
+  canvas.style.width = (WIDTH * scale) + 'px';
+  canvas.style.height = (HEIGHT * scale) + 'px';
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// --- Game State ---
+const game = {
+  screen: 'title',
+  score: 0,
+  level: 1,
+  cracks: 0
+};
+
+// --- Player ---
+const player = {
+  x: WIDTH / 2,
+  y: HEIGHT - 80,
+  width: 60,
+  height: 60,
+  speed: 300,
+  emoji: '\u{1F437}'
+};
+
+// --- Falling Objects ---
+const objects = [];
+let spawnTimer = 0;
+const SPAWN_INTERVAL = 1.0;
+
+const COIN_TYPES = [
+  { emoji: '\u{1FA99}', value: 1, weight: 60 },
+  { emoji: '\u{1F4B5}', value: 5, weight: 25 },
+  { emoji: '\u{1F4B0}', value: 10, weight: 15 }
+];
+
+function pickCoinType() {
+  const roll = Math.random() * 100;
+  let cumulative = 0;
+  for (const type of COIN_TYPES) {
+    cumulative += type.weight;
+    if (roll < cumulative) return type;
+  }
+  return COIN_TYPES[0];
+}
+
+function spawnCoin() {
+  const type = pickCoinType();
+  const size = 36;
+  objects.push({
+    x: Math.random() * (WIDTH - size) + size / 2,
+    y: -size / 2,
+    width: size,
+    height: size,
+    speed: 150,
+    emoji: type.emoji,
+    value: type.value
+  });
+}
+
+// --- Input ---
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
+    e.preventDefault();
+  }
+  keys[e.key] = true;
+
+  if (e.key === ' ' && game.screen === 'title') {
+    game.screen = 'playing';
+    game.score = 0;
+    objects.length = 0;
+    spawnTimer = 0;
+  }
+});
+window.addEventListener('keyup', (e) => {
+  keys[e.key] = false;
+});
+
+// --- AABB Collision ---
+function aabb(a, b) {
+  return (
+    a.x - a.width / 2 < b.x + b.width / 2 &&
+    a.x + a.width / 2 > b.x - b.width / 2 &&
+    a.y - a.height / 2 < b.y + b.height / 2 &&
+    a.y + a.height / 2 > b.y - b.height / 2
+  );
+}
+
+// --- Update ---
+function update(dt) {
+  if (game.screen !== 'playing') return;
+
+  // Player movement
+  if (keys['ArrowLeft']) {
+    player.x -= player.speed * dt;
+  }
+  if (keys['ArrowRight']) {
+    player.x += player.speed * dt;
+  }
+  // Clamp within bounds
+  const halfW = player.width / 2;
+  if (player.x < halfW) player.x = halfW;
+  if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
+
+  // Spawn timer
+  spawnTimer += dt;
+  if (spawnTimer >= SPAWN_INTERVAL) {
+    spawnTimer -= SPAWN_INTERVAL;
+    spawnCoin();
+  }
+
+  // Update falling objects
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    obj.y += obj.speed * dt;
+
+    // Collision with player
+    if (aabb(player, obj)) {
+      game.score += obj.value;
+      objects.splice(i, 1);
+      continue;
+    }
+
+    // Off screen
+    if (obj.y > HEIGHT + obj.height) {
+      objects.splice(i, 1);
+    }
+  }
+}
+
+// --- Draw ---
+function draw() {
+  // Sky blue background
+  ctx.fillStyle = '#87CEEB';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  if (game.screen === 'title') {
+    drawTitle();
+  } else if (game.screen === 'playing') {
+    drawPlaying();
+  }
+}
+
+function drawTitle() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.font = '48px sans-serif';
+  ctx.fillStyle = '#2d2d2d';
+  ctx.fillText('\u{1F437} Kasica Prasica \u{1F437}', WIDTH / 2, HEIGHT / 2 - 30);
+
+  ctx.font = '24px sans-serif';
+  ctx.fillStyle = '#444';
+  ctx.fillText('Press SPACE to start', WIDTH / 2, HEIGHT / 2 + 40);
+}
+
+function drawPlaying() {
+  // Green ground
+  const groundHeight = 40;
+  ctx.fillStyle = '#4CAF50';
+  ctx.fillRect(0, HEIGHT - groundHeight, WIDTH, groundHeight);
+
+  // Falling objects
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '32px sans-serif';
+  for (const obj of objects) {
+    ctx.fillText(obj.emoji, obj.x, obj.y);
+  }
+
+  // Player
+  ctx.font = '48px sans-serif';
+  ctx.fillText(player.emoji, player.x, player.y);
+
+  // Score HUD
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = '24px sans-serif';
+  ctx.fillStyle = '#2d2d2d';
+  ctx.fillText('\u{1FA99} Score: ' + game.score, 15, 15);
+}
+
+// --- Game Loop ---
+let lastTime = 0;
+function gameLoop(timestamp) {
+  let dt = (timestamp - lastTime) / 1000;
+  if (dt > 0.1) dt = 0.1;
+  lastTime = timestamp;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame((timestamp) => {
+  lastTime = timestamp;
+  gameLoop(timestamp);
+});
+</script>
+</body>
+</html>
