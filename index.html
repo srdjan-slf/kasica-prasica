@@ -40,18 +40,55 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
-// --- Level Configuration ---
+// --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
-  return {
-    duration: 30 + level * 5,
-    fallSpeed: 120 + level * 20,
-    spawnRate: Math.max(0.3, 1.0 - level * 0.1),
-    devilCount: level,
-    devilInterval: null, // calculated below
-    bombChance: Math.min(0.25, 0.03 + level * 0.02),
-    billChance: Math.min(0.3, 0.1 + level * 0.05),
-    goldChance: Math.min(0.15, 0.05 + level * 0.02)
-  };
+  // Level 1: Gentle intro. Level 2: Bills appear. Level 3+: Bombs ramp. Level 5+: Intense. Level 8+: Chaos.
+  let spawnRate, fallSpeed, devilCount, bombChance, billChance, goldChance, duration;
+
+  if (level === 1) {
+    duration = 35;
+    fallSpeed = 120;
+    spawnRate = 1.0;
+    devilCount = 1;
+    bombChance = 0.02;
+    billChance = 0.05;
+    goldChance = 0.02;
+  } else if (level === 2) {
+    duration = 35;
+    fallSpeed = 140;
+    spawnRate = 0.9;
+    devilCount = 2;
+    bombChance = 0.05;
+    billChance = 0.15;
+    goldChance = 0.05;
+  } else if (level <= 4) {
+    duration = 30 + level * 5;
+    fallSpeed = 140 + level * 20;
+    spawnRate = Math.max(0.5, 0.9 - (level - 2) * 0.1);
+    devilCount = level;
+    bombChance = 0.05 + (level - 2) * 0.04;
+    billChance = 0.2;
+    goldChance = 0.07;
+  } else if (level <= 7) {
+    duration = 30 + level * 5;
+    fallSpeed = 180 + level * 20;
+    spawnRate = Math.max(0.35, 0.6 - (level - 4) * 0.08);
+    devilCount = level + 1;
+    bombChance = Math.min(0.25, 0.1 + (level - 4) * 0.04);
+    billChance = 0.25;
+    goldChance = 0.1;
+  } else {
+    // Level 8+: Chaos mode
+    duration = 30 + level * 4;
+    fallSpeed = 220 + level * 18;
+    spawnRate = Math.max(0.2, 0.35 - (level - 7) * 0.03);
+    devilCount = level + 2;
+    bombChance = Math.min(0.3, 0.2 + (level - 7) * 0.02);
+    billChance = 0.3;
+    goldChance = 0.12;
+  }
+
+  return { duration, fallSpeed, spawnRate, devilCount, bombChance, billChance, goldChance };
 }
 
 // --- Game State ---
@@ -64,7 +101,8 @@ const game = {
   levelTimer: 0,
   levelConfig: null,
   devilsSpawned: 0,
-  devilSchedule: []
+  devilSchedule: [],
+  lastScore: 0 // track for HUD bounce
 };
 
 // --- Player ---
@@ -90,6 +128,139 @@ const ejectedCoins = [];
 let squealTimer = 0;
 let successFlashTimer = 0;
 let shakeHintTimer = 0;
+
+// --- Particle System ---
+const particles = [];
+const MAX_PARTICLES = 100;
+
+function spawnParticles(x, y, emoji, count, spread) {
+  for (let i = 0; i < count; i++) {
+    if (particles.length >= MAX_PARTICLES) break;
+    particles.push({
+      x, y,
+      emoji: emoji,
+      size: 12 + Math.random() * 8,
+      vx: (Math.random() - 0.5) * (spread || 200),
+      vy: -Math.random() * 250 - 50,
+      gravity: 400,
+      life: 1.0,
+      decay: 0.8 + Math.random() * 0.5
+    });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.vy += p.gravity * dt;
+    p.y += p.vy * dt;
+    p.life -= p.decay * dt;
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+    }
+  }
+}
+
+function drawParticles() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = p.size + 'px sans-serif';
+    ctx.fillText(p.emoji, p.x, p.y);
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+// --- Screen Shake ---
+let screenShake = { intensity: 0, duration: 0 };
+function triggerScreenShake(intensity, duration) {
+  screenShake.intensity = intensity;
+  screenShake.duration = duration;
+}
+
+function updateScreenShake(dt) {
+  if (screenShake.duration > 0) {
+    screenShake.duration -= dt;
+    if (screenShake.duration <= 0) {
+      screenShake.intensity = 0;
+      screenShake.duration = 0;
+    }
+  }
+}
+
+function applyScreenShake() {
+  if (screenShake.intensity > 0 && screenShake.duration > 0) {
+    const offsetX = (Math.random() - 0.5) * 2 * screenShake.intensity;
+    const offsetY = (Math.random() - 0.5) * 2 * screenShake.intensity;
+    ctx.translate(offsetX, offsetY);
+    return true;
+  }
+  return false;
+}
+
+// --- Score Pop-ups ---
+const scorePopups = [];
+
+function spawnScorePopup(x, y, text, color) {
+  scorePopups.push({
+    x, y,
+    text: text,
+    color: color,
+    life: 1.0,
+    vy: -80
+  });
+}
+
+function updateScorePopups(dt) {
+  for (let i = scorePopups.length - 1; i >= 0; i--) {
+    const p = scorePopups[i];
+    p.y += p.vy * dt;
+    p.life -= 0.8 * dt;
+    if (p.life <= 0) {
+      scorePopups.splice(i, 1);
+    }
+  }
+}
+
+function drawScorePopups() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const p of scorePopups) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = 'bold 22px sans-serif';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(p.text, p.x, p.y);
+    ctx.fillStyle = p.color;
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1.0;
+  ctx.lineWidth = 1;
+}
+
+// --- Background Clouds ---
+const clouds = [
+  { x: 100, y: 60, speed: 12, size: 36 },
+  { x: 350, y: 100, speed: 18, size: 42 },
+  { x: 600, y: 40, speed: 10, size: 32 },
+  { x: 200, y: 130, speed: 15, size: 38 }
+];
+
+function updateClouds(dt) {
+  for (const c of clouds) {
+    c.x += c.speed * dt;
+    if (c.x > WIDTH + 50) c.x = -50;
+  }
+}
+
+// --- Piggy Visual State ---
+let piggyBobTimer = 0;
+let piggyDamageTimer = 0; // red tint + scale pulse on damage
+
+// --- HUD bounce ---
+let scoreBounceFactor = 0;
 
 // --- Title screen background coins ---
 const titleCoins = [];
@@ -132,20 +303,163 @@ function playShakeSound() {
   osc.stop(ctx.currentTime + 0.05);
 }
 
+function playCoinCollect() {
+  const actx = getAudioContext();
+  const osc = actx.createOscillator();
+  const gain = actx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, actx.currentTime);
+  gain.gain.setValueAtTime(0.12, actx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.1);
+  osc.connect(gain);
+  gain.connect(actx.destination);
+  osc.start();
+  osc.stop(actx.currentTime + 0.1);
+}
+
+function playBillCollect() {
+  const actx = getAudioContext();
+  [880, 1100].forEach((freq, i) => {
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.08);
+    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.08);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.08 + 0.1);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(actx.currentTime + i * 0.08);
+    osc.stop(actx.currentTime + i * 0.08 + 0.1);
+  });
+}
+
+function playGoldCollect() {
+  const actx = getAudioContext();
+  [660, 880, 1100].forEach((freq) => {
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, actx.currentTime);
+    gain.gain.setValueAtTime(0.1, actx.currentTime);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start();
+    osc.stop(actx.currentTime + 0.25);
+  });
+}
+
+function playBombExplosion() {
+  const actx = getAudioContext();
+  // Low sine boom
+  const osc = actx.createOscillator();
+  const gain = actx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(100, actx.currentTime);
+  osc.frequency.linearRampToValueAtTime(40, actx.currentTime + 0.3);
+  gain.gain.setValueAtTime(0.2, actx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.3);
+  osc.connect(gain);
+  gain.connect(actx.destination);
+  osc.start();
+  osc.stop(actx.currentTime + 0.3);
+  // Noise burst
+  const bufferSize = actx.sampleRate * 0.15;
+  const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  }
+  const noise = actx.createBufferSource();
+  noise.buffer = buffer;
+  const noiseGain = actx.createGain();
+  noiseGain.gain.setValueAtTime(0.15, actx.currentTime);
+  noiseGain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.15);
+  noise.connect(noiseGain);
+  noiseGain.connect(actx.destination);
+  noise.start();
+  noise.stop(actx.currentTime + 0.15);
+}
+
+function playDevilLatch() {
+  const actx = getAudioContext();
+  const osc = actx.createOscillator();
+  const gain = actx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(200, actx.currentTime);
+  osc.frequency.linearRampToValueAtTime(100, actx.currentTime + 0.5);
+  gain.gain.setValueAtTime(0.12, actx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.5);
+  osc.connect(gain);
+  gain.connect(actx.destination);
+  osc.start();
+  osc.stop(actx.currentTime + 0.5);
+}
+
+function playShakeSuccess() {
+  const actx = getAudioContext();
+  // Quick ascending whoosh (noise sweep)
+  const bufferSize = actx.sampleRate * 0.15;
+  const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = (Math.random() * 2 - 1) * (i / bufferSize);
+  }
+  const noise = actx.createBufferSource();
+  noise.buffer = buffer;
+  const noiseGain = actx.createGain();
+  noiseGain.gain.setValueAtTime(0.1, actx.currentTime);
+  noiseGain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.15);
+  noise.connect(noiseGain);
+  noiseGain.connect(actx.destination);
+  noise.start();
+  noise.stop(actx.currentTime + 0.15);
+  // Short percussive "bonk"
+  const osc = actx.createOscillator();
+  const gain = actx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(300, actx.currentTime + 0.1);
+  gain.gain.setValueAtTime(0.15, actx.currentTime + 0.1);
+  gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.18);
+  osc.connect(gain);
+  gain.connect(actx.destination);
+  osc.start(actx.currentTime + 0.1);
+  osc.stop(actx.currentTime + 0.18);
+}
+
 function playLevelComplete() {
   const actx = getAudioContext();
+  // C-E-G-C ascending melody
   const notes = [523, 659, 784, 1047];
   notes.forEach((freq, i) => {
     const osc = actx.createOscillator();
     const gain = actx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.12);
-    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.12);
-    gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.12 + 0.3);
+    osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.15);
+    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.15);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.15 + 0.3);
     osc.connect(gain);
     gain.connect(actx.destination);
-    osc.start(actx.currentTime + i * 0.12);
-    osc.stop(actx.currentTime + i * 0.12 + 0.3);
+    osc.start(actx.currentTime + i * 0.15);
+    osc.stop(actx.currentTime + i * 0.15 + 0.3);
+  });
+}
+
+function playGameOver() {
+  const actx = getAudioContext();
+  // G-E-C descending, minor feel (use Eb instead of E)
+  const notes = [784, 622, 523];
+  notes.forEach((freq, i) => {
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.2);
+    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.2);
+    gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.2 + 0.35);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(actx.currentTime + i * 0.2);
+    osc.stop(actx.currentTime + i * 0.2 + 0.35);
   });
 }
 
@@ -159,11 +473,10 @@ const COIN_TYPES = [
 function pickCoinType() {
   if (!game.levelConfig) return COIN_TYPES[0];
   const cfg = game.levelConfig;
-  // Use level config chances to adjust weights
   const roll = Math.random();
-  if (roll < cfg.goldChance) return COIN_TYPES[2]; // gold bag
-  if (roll < cfg.goldChance + cfg.billChance) return COIN_TYPES[1]; // bill
-  return COIN_TYPES[0]; // regular coin
+  if (roll < cfg.goldChance) return COIN_TYPES[2];
+  if (roll < cfg.goldChance + cfg.billChance) return COIN_TYPES[1];
+  return COIN_TYPES[0];
 }
 
 function spawnObject() {
@@ -228,14 +541,14 @@ function startLevel() {
   game.devilsSpawned = 0;
   game.cracks = 0;
   game.latchedDevil = null;
+  game.lastScore = game.score;
 
-  // Calculate devil spawn schedule: spread evenly, but not in first 5 seconds
+  // Calculate devil spawn schedule
   game.devilSchedule = [];
   if (cfg.devilCount > 0) {
-    const availableTime = cfg.duration - 5; // exclude first 5 seconds
+    const availableTime = cfg.duration - 5;
     const interval = availableTime / (cfg.devilCount + 1);
     for (let i = 1; i <= cfg.devilCount; i++) {
-      // Time remaining when devil should spawn (counting down from duration)
       const spawnAt = cfg.duration - (5 + interval * i);
       game.devilSchedule.push(spawnAt);
     }
@@ -244,6 +557,8 @@ function startLevel() {
   // Clear everything
   objects.length = 0;
   ejectedCoins.length = 0;
+  particles.length = 0;
+  scorePopups.length = 0;
   spawnTimer = 0;
   flashTimer = 0;
   lastShakeKey = null;
@@ -252,6 +567,10 @@ function startLevel() {
   shakeHintTimer = 0;
   shakeVisualOffset = 0;
   shakeVisualTimer = 0;
+  screenShake.intensity = 0;
+  screenShake.duration = 0;
+  piggyDamageTimer = 0;
+  scoreBounceFactor = 0;
   player.x = WIDTH / 2;
 
   game.screen = 'playing';
@@ -312,16 +631,33 @@ function aabb(a, b) {
 }
 
 // --- Update ---
-function triggerDamage() {
+function triggerDamage(fromBomb) {
   game.cracks++;
   game.score = Math.max(0, game.score - 5);
   flashTimer = 0.3;
+  piggyDamageTimer = 0.3;
+  spawnScorePopup(player.x, player.y - 40, '-5', '#ff4444');
+
+  if (fromBomb) {
+    // Bomb explosion particles
+    const explosionEmojis = ['\u{1F4A5}', '\u{1F525}', '\u{1F4A5}', '\u{1F525}'];
+    for (let i = 0; i < 7; i++) {
+      spawnParticles(player.x, player.y, explosionEmojis[i % explosionEmojis.length], 1, 300);
+    }
+    triggerScreenShake(8, 0.3);
+    playBombExplosion();
+  }
+
   if (game.cracks >= 3) {
     game.screen = 'gameOver';
+    playGameOver();
   }
 }
 
 function update(dt) {
+  // Always update clouds
+  updateClouds(dt);
+
   // Update title screen background coins
   if (game.screen === 'title') {
     titleCoinTimer += dt;
@@ -345,24 +681,42 @@ function update(dt) {
     return;
   }
 
+  // Update particles on level complete screen too
+  if (game.screen === 'levelComplete') {
+    updateParticles(dt);
+    return;
+  }
+
   if (game.screen !== 'playing') return;
+
+  // Piggy bob timer
+  piggyBobTimer += dt;
 
   // Flash timer countdown
   if (flashTimer > 0) flashTimer -= dt;
   if (successFlashTimer > 0) successFlashTimer -= dt;
+  if (piggyDamageTimer > 0) piggyDamageTimer -= dt;
+  if (scoreBounceFactor > 0) scoreBounceFactor -= dt * 4;
   if (shakeVisualTimer > 0) {
     shakeVisualTimer -= dt;
     if (shakeVisualTimer <= 0) shakeVisualOffset = 0;
   }
 
+  // Update screen shake
+  updateScreenShake(dt);
+
+  // Update particles
+  updateParticles(dt);
+
+  // Update score pop-ups
+  updateScorePopups(dt);
+
   // Level timer countdown
   game.levelTimer -= dt;
   if (game.levelTimer <= 0) {
     game.levelTimer = 0;
-    // Level complete!
     objects.length = 0;
     ejectedCoins.length = 0;
-    // Remove latched devil without damage
     if (game.latchedDevil) {
       game.latchedDevil = null;
       lastShakeKey = null;
@@ -371,6 +725,16 @@ function update(dt) {
     }
     game.screen = 'levelComplete';
     playLevelComplete();
+    // Level complete confetti particles
+    const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
+    for (let i = 0; i < 18; i++) {
+      spawnParticles(
+        WIDTH * 0.2 + Math.random() * WIDTH * 0.6,
+        HEIGHT * 0.3 + Math.random() * 50,
+        confettiEmojis[i % confettiEmojis.length],
+        1, 350
+      );
+    }
     return;
   }
 
@@ -381,12 +745,11 @@ function update(dt) {
   if (keys['ArrowRight']) {
     player.x += player.speed * dt;
   }
-  // Clamp within bounds
   const halfW = player.width / 2;
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
 
-  // Spawn timer (coins and bombs) using level config
+  // Spawn timer
   const spawnRate = game.levelConfig ? game.levelConfig.spawnRate : 1.0;
   spawnTimer += dt;
   if (spawnTimer >= spawnRate) {
@@ -396,7 +759,6 @@ function update(dt) {
 
   // Devil spawn from schedule
   if (game.devilSchedule.length > 0) {
-    // Check if levelTimer has passed the next scheduled devil time
     const nextDevilTime = game.devilSchedule[0];
     if (game.levelTimer <= nextDevilTime) {
       game.devilSchedule.shift();
@@ -414,6 +776,11 @@ function update(dt) {
     devil.hammerAnimTimer += dt;
     shakeHintTimer += dt;
 
+    // Continuous screen shake while devil is latched (subtle)
+    if (screenShake.duration <= 0) {
+      triggerScreenShake(3, 0.1);
+    }
+
     // Squeal timer
     squealTimer += dt;
     if (squealTimer >= 0.8) {
@@ -421,7 +788,7 @@ function update(dt) {
       playSqueal();
     }
 
-    // Shake success - eject coin to knock devil off
+    // Shake success
     if (devil.shakeProgress >= devil.shakeRequired) {
       const flyDirection = (Math.random() < 0.5 ? -1 : 1);
       ejectedCoins.push({
@@ -443,6 +810,13 @@ function update(dt) {
       });
 
       game.score = Math.max(0, game.score - 3);
+      spawnScorePopup(player.x, player.y - 50, '-3', '#ff4444');
+      // Sparkle particles for devil knock-off
+      for (let i = 0; i < 5; i++) {
+        spawnParticles(player.x, player.y - 30, '\u2B50', 1, 180);
+      }
+      playShakeSuccess();
+
       game.latchedDevil = null;
       lastShakeKey = null;
       squealTimer = 0;
@@ -451,11 +825,11 @@ function update(dt) {
     }
   }
 
-  // Devil hammer timer expired - causes damage
+  // Devil hammer timer expired
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
     if (devil.hammerTimer >= 5.0) {
-      triggerDamage();
+      triggerDamage(false);
       objects.push({
         type: 'devil',
         emoji: devil.emoji,
@@ -503,7 +877,7 @@ function update(dt) {
     const obj = objects[i];
     obj.y += obj.speed * dt;
 
-    // Fly-away devils (animation only)
+    // Fly-away devils
     if (obj.flyAway) {
       obj.flyAwayTimer -= dt;
       obj.y -= 300 * dt;
@@ -517,7 +891,7 @@ function update(dt) {
     // Collision with player
     if (aabb(player, obj)) {
       if (obj.type === 'bomb') {
-        triggerDamage();
+        triggerDamage(true);
         objects.splice(i, 1);
         continue;
       } else if (obj.type === 'devil') {
@@ -537,12 +911,30 @@ function update(dt) {
           lastShakeKey = null;
           squealTimer = 0;
           shakeHintTimer = 0;
+          playDevilLatch();
         }
         objects.splice(i, 1);
         continue;
       } else {
-        // Coin
+        // Coin collected
         game.score += obj.value;
+        scoreBounceFactor = 1.0;
+
+        // Particles + sound based on value
+        if (obj.value === 1) {
+          spawnParticles(obj.x, obj.y, '\u2728', 3, 120);
+          spawnScorePopup(obj.x, obj.y - 10, '+1', '#ffffff');
+          playCoinCollect();
+        } else if (obj.value === 5) {
+          spawnParticles(obj.x, obj.y, '\u2728', 4, 150);
+          spawnScorePopup(obj.x, obj.y - 10, '+5', '#44dd44');
+          playBillCollect();
+        } else if (obj.value === 10) {
+          spawnParticles(obj.x, obj.y, '\u2728', 5, 180);
+          spawnScorePopup(obj.x, obj.y - 10, '+10', '#ffd700');
+          playGoldCollect();
+        }
+
         objects.splice(i, 1);
         continue;
       }
@@ -556,15 +948,213 @@ function update(dt) {
 }
 
 // --- Draw ---
-function draw() {
-  // Sky blue background
-  ctx.fillStyle = '#87CEEB';
+function drawBackground() {
+  // Vertical sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  grad.addColorStop(0, '#87CEEB');
+  grad.addColorStop(1, '#5BA3CF');
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Draw clouds
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const c of clouds) {
+    ctx.globalAlpha = 0.6;
+    ctx.font = c.size + 'px sans-serif';
+    ctx.fillText('\u2601\uFE0F', c.x, c.y);
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+function drawGround() {
+  const groundY = HEIGHT - 40;
+  const groundHeight = 40;
+  // Base green
+  ctx.fillStyle = '#4CAF50';
+  ctx.fillRect(0, groundY, WIDTH, groundHeight);
+  // Darker stripe pattern for grass
+  ctx.fillStyle = '#43A047';
+  for (let x = 0; x < WIDTH; x += 20) {
+    if ((x / 20) % 2 === 0) {
+      ctx.fillRect(x, groundY, 10, groundHeight);
+    }
+  }
+  // Scattered grass emoji
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.globalAlpha = 0.5;
+  for (let x = 15; x < WIDTH; x += 55) {
+    ctx.fillText('\u{1F33F}', x, groundY + 6);
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+function drawPiggy() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const bobOffset = Math.sin(piggyBobTimer * 3) * 2; // subtle idle bob
+  const drawY = player.y + shakeVisualOffset + bobOffset;
+
+  ctx.save();
+  ctx.translate(player.x, drawY);
+
+  // Wobble for 2 cracks
+  if (game.cracks >= 2) {
+    const wobble = Math.sin(Date.now() / 80) * 0.06;
+    ctx.rotate(wobble);
+  }
+
+  // Scale pulse on damage
+  let scale = 1.0;
+  if (piggyDamageTimer > 0) {
+    scale = 1.0 + 0.15 * Math.sin(piggyDamageTimer / 0.3 * Math.PI);
+  }
+  ctx.scale(scale, scale);
+
+  // Red tint overlay for damage
+  if (piggyDamageTimer > 0) {
+    ctx.globalAlpha = 0.7;
+  }
+
+  ctx.font = '48px sans-serif';
+  ctx.fillText(player.emoji, 0, 0);
+  ctx.globalAlpha = 1.0;
+
+  // Draw crack lines
+  if (game.cracks >= 1) {
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-8, -12);
+    ctx.lineTo(10, 10);
+    ctx.stroke();
+  }
+  if (game.cracks >= 2) {
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(8, -14);
+    ctx.lineTo(-6, 8);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // Red tint flash on damage
+  if (piggyDamageTimer > 0) {
+    ctx.globalAlpha = piggyDamageTimer / 0.3 * 0.3;
+    ctx.fillStyle = '#ff0000';
+    ctx.beginPath();
+    ctx.arc(player.x, drawY, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+  }
+}
+
+function drawHUD() {
+  // --- HUD with drop shadows and polished styling ---
+
+  // Helper for drop shadow text
+  function hudText(text, x, y, font, color, align) {
+    ctx.textAlign = align || 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = font;
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillText(text, x + 1, y + 2);
+    // Main text
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+  }
+
+  // Top-left: Score with bouncing coin icon
+  const coinBounce = Math.sin(Math.max(0, scoreBounceFactor) * Math.PI) * 5;
+  hudText('\u{1FA99}', 15, 12 - coinBounce, 'bold 24px sans-serif', '#fff', 'left');
+  hudText(' Score: ' + game.score, 38, 14, 'bold 22px sans-serif', '#fff', 'left');
+
+  // Top-center: Level with rounded background
+  ctx.textAlign = 'center';
+  const levelText = 'Level ' + game.level;
+  ctx.font = 'bold 22px sans-serif';
+  const levelTextW = ctx.measureText(levelText).width;
+  // Rounded background pill
+  const pillX = WIDTH / 2 - levelTextW / 2 - 14;
+  const pillY = 8;
+  const pillW = levelTextW + 28;
+  const pillH = 28;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.roundRect(pillX, pillY, pillW, pillH, 14);
+  ctx.fill();
+  hudText(levelText, WIDTH / 2, 10, 'bold 22px sans-serif', '#fff', 'center');
+
+  // Timer bar below level text
+  if (game.levelConfig) {
+    const timerBarWidth = 160;
+    const timerBarHeight = 10;
+    const timerBarX = WIDTH / 2 - timerBarWidth / 2;
+    const timerBarY = 40;
+    const timerFill = Math.max(0, game.levelTimer / game.levelConfig.duration);
+
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.roundRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight, 5);
+    ctx.fill();
+
+    let barColor;
+    if (timerFill > 0.5) barColor = '#44cc44';
+    else if (timerFill > 0.2) barColor = '#cccc44';
+    else barColor = '#cc4444';
+
+    ctx.fillStyle = barColor;
+    ctx.beginPath();
+    ctx.roundRect(timerBarX, timerBarY, timerBarWidth * timerFill, timerBarHeight, 5);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight, 5);
+    ctx.stroke();
+
+    // Time remaining
+    hudText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, 54, '14px sans-serif', 'rgba(255,255,255,0.8)', 'center');
+  }
+
+  // Top-right: Crack indicator with piggy icons
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  const crackStartX = WIDTH - 15;
+  ctx.font = '22px sans-serif';
+  for (let i = 0; i < 3; i++) {
+    const cx = crackStartX - (2 - i) * 28;
+    if (i < game.cracks) {
+      // Cracked piggy (broken heart)
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillText('\u{1F494}', cx + 1, 16);
+      ctx.fillText('\u{1F494}', cx, 14);
+    } else {
+      // Healthy piggy
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillText('\u{1F437}', cx + 1, 16);
+      ctx.fillText('\u{1F437}', cx, 14);
+    }
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+function draw() {
+  drawBackground();
 
   if (game.screen === 'title') {
     drawTitle();
   } else if (game.screen === 'playing') {
-    drawPlaying();
+    drawPlayingScene();
   } else if (game.screen === 'levelComplete') {
     drawLevelComplete();
   } else if (game.screen === 'gameOver') {
@@ -606,11 +1196,12 @@ function drawTitle() {
   ctx.globalAlpha = 1.0;
 }
 
-function drawPlaying() {
-  // Green ground
-  const groundHeight = 40;
-  ctx.fillStyle = '#4CAF50';
-  ctx.fillRect(0, HEIGHT - groundHeight, WIDTH, groundHeight);
+function drawPlayingScene() {
+  ctx.save();
+  // Apply screen shake
+  applyScreenShake();
+
+  drawGround();
 
   // Falling objects
   ctx.textAlign = 'center';
@@ -626,14 +1217,15 @@ function drawPlaying() {
     ctx.fillText(obj.emoji, obj.x, obj.y);
   }
 
-  // Player (with shake visual offset)
-  ctx.font = '48px sans-serif';
-  ctx.fillText(player.emoji, player.x, player.y + shakeVisualOffset);
+  // Player (piggy with visual states)
+  drawPiggy();
 
   // Latched devil on top of player
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
     ctx.font = '36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
 
     // Hammer animation
@@ -641,7 +1233,7 @@ function drawPlaying() {
     ctx.font = '24px sans-serif';
     ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
 
-    // Danger bar (red) above the piggy
+    // Danger bar (red)
     const barWidth = 60;
     const barHeight = 8;
     const barX = player.x - barWidth / 2;
@@ -711,6 +1303,12 @@ function drawPlaying() {
     }
   }
 
+  // Particles
+  drawParticles();
+
+  // Score pop-ups
+  drawScorePopups();
+
   // Success flash (green)
   if (successFlashTimer > 0) {
     ctx.globalAlpha = successFlashTimer / 0.4 * 0.25;
@@ -719,62 +1317,6 @@ function drawPlaying() {
     ctx.globalAlpha = 1.0;
   }
 
-  // --- HUD ---
-  // Top-left: Score
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.font = 'bold 24px sans-serif';
-  ctx.fillStyle = '#2d2d2d';
-  ctx.fillText('\u{1FA99} Score: ' + game.score, 15, 15);
-
-  // Top-center: Level + timer bar
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillStyle = '#2d2d2d';
-  ctx.fillText('Level ' + game.level, WIDTH / 2, 12);
-
-  // Timer bar below level text
-  if (game.levelConfig) {
-    const timerBarWidth = 160;
-    const timerBarHeight = 10;
-    const timerBarX = WIDTH / 2 - timerBarWidth / 2;
-    const timerBarY = 38;
-    const timerFill = Math.max(0, game.levelTimer / game.levelConfig.duration);
-
-    // Background
-    ctx.fillStyle = '#333';
-    ctx.fillRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight);
-
-    // Fill - color shifts from green to yellow to red
-    let barColor;
-    if (timerFill > 0.5) barColor = '#44cc44';
-    else if (timerFill > 0.2) barColor = '#cccc44';
-    else barColor = '#cc4444';
-
-    ctx.fillStyle = barColor;
-    ctx.fillRect(timerBarX, timerBarY, timerBarWidth * timerFill, timerBarHeight);
-
-    // Border
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(timerBarX, timerBarY, timerBarWidth, timerBarHeight);
-
-    // Time remaining text
-    ctx.font = '14px sans-serif';
-    ctx.fillStyle = '#555';
-    ctx.fillText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, 52);
-  }
-
-  // Top-right: Crack indicator
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'top';
-  ctx.font = '24px sans-serif';
-  let crackText = '\u{1F437}';
-  for (let i = 0; i < game.cracks; i++) {
-    crackText += '\u{1F494}';
-  }
-  ctx.fillText(crackText, WIDTH - 15, 15);
-
   // Red flash overlay
   if (flashTimer > 0) {
     ctx.globalAlpha = flashTimer / 0.3 * 0.4;
@@ -782,6 +1324,11 @@ function drawPlaying() {
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.globalAlpha = 1.0;
   }
+
+  ctx.restore(); // restore screen shake transform
+
+  // HUD drawn outside shake transform so it stays stable
+  drawHUD();
 }
 
 function drawLevelComplete() {
@@ -801,6 +1348,9 @@ function drawLevelComplete() {
     ctx.fillText('\u2728', sx, sy);
   }
   ctx.globalAlpha = 1.0;
+
+  // Particles (confetti)
+  drawParticles();
 
   ctx.font = 'bold 48px sans-serif';
   ctx.fillStyle = '#2d2d2d';
