@@ -2557,54 +2557,54 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
 const MOBILE_SCALE = isMobile ? 1.4 : 1.0;
 
 // Layout:
-//   Left side:                Right side:
-//    [◀ LEVO]                   [💩 SERI]
-//    [▲ SKOK]                   [▶ DESNO]  ← same height as LEVO
-//                               [💨 PRDNI]
+//   Left side:          Right side:
+//    [◀ LEVO]            [💩 SERI]
+//    [▲ SKOK]            [▶ DESNO]
+//                        [💨 PRDNI]
+// SKOK below LEVO, GOVNO above DESNO, PRDEŽ below DESNO
 
-const BTN_R = 18;    // corner radius
-const PAD = 10;      // padding from screen edges
-const MARGIN = Math.floor(WIDTH * 0.05);  // 5% width gap
+const BTN_R = 18;
+const PAD = 10;
+const GAP = 8;  // gap between stacked buttons
 
-// LEVO / DESNO - same width, centered vertically, LEVO slightly taller
+// LEVO / DESNO - same width, centered vertically
 const DIR_W = 140;
-const DIR_H = 160;   // slightly taller than before
-const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);  // centered
+const DIR_H = 160;
+const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);
 
-// SKOK - below LEVO, same width, with small gap
-const JUMP_GAP = 8;
+// SKOK - below LEVO, same width
 const JUMP_H = 100;
-const JUMP_Y = DIR_Y + DIR_H + JUMP_GAP;
+const JUMP_Y = DIR_Y + DIR_H + GAP;
 
-// Action buttons next to DESNO
-const ACT_W = 130;
-const POOP_X = WIDTH - PAD - DIR_W - MARGIN - ACT_W;
-const POOP_H = Math.floor((DIR_H - 8) / 2);
-const POOP_Y = DIR_Y;
-const FART_H = DIR_H - POOP_H - 8;
-const FART_Y = POOP_Y + POOP_H + 8;
+// SERI (poop) - above DESNO, same width as DESNO
+const POOP_H = 100;
+const POOP_Y = DIR_Y - GAP - POOP_H;
+
+// PRDNI (fart) - below DESNO, same width as DESNO
+const FART_H = 100;
+const FART_Y = DIR_Y + DIR_H + GAP;
 
 const mobileZones = [
-  // LEVO - left side, centered vertically
+  // LEVO
   { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',
     color: 'rgba(100,150,255,',
     x: PAD, y: DIR_Y, w: DIR_W, h: DIR_H },
-  // SKOK - directly below LEVO, same width
+  // SKOK - below LEVO
   { id: 'jump',  key: 'ArrowUp',    icon: '\u25B2', label: 'SKOK',
     color: 'rgba(255,220,50,',
     x: PAD, y: JUMP_Y, w: DIR_W, h: JUMP_H },
-  // DESNO - right side, same Y as LEVO
+  // SERI - above DESNO
+  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',
+    color: 'rgba(136,102,0,',
+    x: WIDTH - PAD - DIR_W, y: POOP_Y, w: DIR_W, h: POOP_H },
+  // DESNO
   { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO',
     color: 'rgba(100,150,255,',
     x: WIDTH - PAD - DIR_W, y: DIR_Y, w: DIR_W, h: DIR_H },
-  // SERI - left of DESNO, top half
-  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',
-    color: 'rgba(136,102,0,',
-    x: POOP_X, y: POOP_Y, w: ACT_W, h: POOP_H },
-  // PRDNI - left of DESNO, bottom half
+  // PRDNI - below DESNO
   { id: 'fart',  key: ' ',          icon: '\uD83D\uDCA8', label: 'PRDNI',
     color: 'rgba(100,200,50,',
-    x: POOP_X, y: FART_Y, w: ACT_W, h: FART_H }
+    x: WIDTH - PAD - DIR_W, y: FART_Y, w: DIR_W, h: FART_H }
 ];
 
 // For hit-testing
