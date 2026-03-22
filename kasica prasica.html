@@ -180,7 +180,7 @@ canvas.height = HEIGHT;
 
 function resizeCanvas() {
   const isMobile = 'ontouchstart' in window || window.innerWidth < 800;
-  const touchH = isMobile ? 110 : 0; // reserve space for touch controls at bottom
+  const touchH = 0; // touch zones are now drawn on canvas, no DOM reservation needed
   const availW = window.innerWidth;
   const availH = window.innerHeight - touchH;
 
@@ -2439,7 +2439,8 @@ window.addEventListener('keyup', (e) => {
 // --- Mobile Touch Controls ---
 const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 const touchControlsEl = document.getElementById('touchControls');
-if (isMobile) touchControlsEl.classList.add('visible');
+// DOM touch controls are always hidden - replaced by canvas-drawn touch zones
+touchControlsEl.classList.remove('visible');
 
 // Track active touches per button
 const activeTouches = {};
@@ -2536,15 +2537,224 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
   }, { passive: false });
 });
 
-// Also handle tapping the canvas on mobile for menu navigation
+// --- Mobile Touch Zones (canvas-based, replaces DOM buttons) ---
+const MOBILE_SCALE = isMobile ? 1.4 : 1.0;
+const TOUCH_ZONE_H = Math.floor(HEIGHT * 0.35); // bottom 35% of canvas
+const TOUCH_ZONE_TOP = HEIGHT - TOUCH_ZONE_H;
+
+// Zone definitions: divide bottom strip into 5 zones
+const mobileZones = [
+  { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',  color: 'rgba(100,150,255,', xFrac: 0, wFrac: 0.20 },
+  { id: 'fart',  key: ' ',          icon: '\uD83D\uDCA8', label: 'PRDNI', color: 'rgba(100,200,50,',  xFrac: 0.20, wFrac: 0.20 },
+  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',  color: 'rgba(136,102,0,',   xFrac: 0.40, wFrac: 0.20 },
+  { id: 'shake', key: 'ShakeUpDown', icon: '\u25B2\u25BC', label: 'TRESI', color: 'rgba(200,200,50,',  xFrac: 0.60, wFrac: 0.15 },
+  { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO', color: 'rgba(100,150,255,', xFrac: 0.75, wFrac: 0.25 }
+];
+
+// Compute pixel rects for zones
+function getZoneRects() {
+  return mobileZones.map(z => ({
+    ...z,
+    x: Math.floor(z.xFrac * WIDTH),
+    y: TOUCH_ZONE_TOP,
+    w: Math.floor(z.wFrac * WIDTH),
+    h: TOUCH_ZONE_H
+  }));
+}
+
+function touchToCanvas(touch) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - rect.left) * WIDTH / rect.width,
+    y: (touch.clientY - rect.top) * HEIGHT / rect.height
+  };
+}
+
+// Track active canvas touches: touchId -> zoneId
+const canvasTouches = {};
+// Track which zones are currently active
+const activeZones = {};
+
+function getZoneAtPoint(cx, cy) {
+  if (cy < TOUCH_ZONE_TOP) return null;
+  const zones = getZoneRects();
+  for (const z of zones) {
+    if (cx >= z.x && cx < z.x + z.w && cy >= z.y && cy < z.y + z.h) {
+      return z;
+    }
+  }
+  return null;
+}
+
+// Shake toggle state for alternating up/down on the shake zone
+let shakeToggle = false;
+let shakeZoneHeld = false;
+let shakeRepeatTimer = null;
+
+function activateZone(zone) {
+  activeZones[zone.id] = true;
+  if (zone.id === 'shake') {
+    // Alternate ArrowUp / ArrowDown rapidly
+    if (!shakeZoneHeld) {
+      shakeZoneHeld = true;
+      shakeToggle = false;
+      doShakeTick();
+      // Repeat every 120ms for rapid shake
+      shakeRepeatTimer = setInterval(doShakeTick, 120);
+    }
+  } else if (zone.id === 'poop') {
+    simulateKeyDown('Poop');
+  } else {
+    simulateKeyDown(zone.key);
+  }
+}
+
+function doShakeTick() {
+  if (!shakeZoneHeld) return;
+  const k = shakeToggle ? 'ArrowDown' : 'ArrowUp';
+  const kOther = shakeToggle ? 'ArrowUp' : 'ArrowDown';
+  simulateKeyUp(kOther);
+  simulateKeyDown(k);
+  shakeToggle = !shakeToggle;
+}
+
+function deactivateZone(zone) {
+  delete activeZones[zone.id];
+  if (zone.id === 'shake') {
+    shakeZoneHeld = false;
+    if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+    simulateKeyUp('ArrowUp');
+    simulateKeyUp('ArrowDown');
+  } else if (zone.id === 'poop') {
+    simulateKeyUp('Poop');
+  } else {
+    simulateKeyUp(zone.key);
+  }
+}
+
+function recalcZonesFromTouches() {
+  // Determine which zones should be active based on all current touches
+  const nowActive = {};
+  for (const tid in canvasTouches) {
+    const zid = canvasTouches[tid];
+    if (zid) nowActive[zid] = true;
+  }
+  const zones = getZoneRects();
+  const zoneMap = {};
+  for (const z of zones) zoneMap[z.id] = z;
+
+  // Activate new zones
+  for (const zid in nowActive) {
+    if (!activeZones[zid]) {
+      activateZone(zoneMap[zid]);
+    }
+  }
+  // Deactivate released zones
+  for (const zid in activeZones) {
+    if (!nowActive[zid]) {
+      deactivateZone(zoneMap[zid]);
+    }
+  }
+}
+
+// Canvas touch handlers for zone-based controls
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   unlockAudio();
+
   if (game.screen !== 'playing') {
-    // Simulate a click for menu screens
+    // Menu screens: simulate click
     canvas.dispatchEvent(new MouseEvent('click'));
+    return;
   }
+
+  if (!isMobile) return;
+
+  for (const touch of e.changedTouches) {
+    const pt = touchToCanvas(touch);
+    const zone = getZoneAtPoint(pt.x, pt.y);
+    canvasTouches[touch.identifier] = zone ? zone.id : null;
+  }
+  recalcZonesFromTouches();
 }, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (game.screen !== 'playing' || !isMobile) return;
+
+  for (const touch of e.changedTouches) {
+    const pt = touchToCanvas(touch);
+    const zone = getZoneAtPoint(pt.x, pt.y);
+    canvasTouches[touch.identifier] = zone ? zone.id : null;
+  }
+  recalcZonesFromTouches();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!isMobile) return;
+
+  for (const touch of e.changedTouches) {
+    delete canvasTouches[touch.identifier];
+  }
+  recalcZonesFromTouches();
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', (e) => {
+  e.preventDefault();
+  if (!isMobile) return;
+
+  for (const touch of e.changedTouches) {
+    delete canvasTouches[touch.identifier];
+  }
+  recalcZonesFromTouches();
+}, { passive: false });
+
+// --- Draw Mobile Touch Zones on Canvas ---
+function drawMobileTouchZones() {
+  if (!isMobile) return;
+  const zones = getZoneRects();
+
+  for (const z of zones) {
+    const isActive = !!activeZones[z.id];
+
+    // Background tint
+    ctx.fillStyle = z.color + (isActive ? '0.20)' : '0.08)');
+    ctx.fillRect(z.x, z.y, z.w, z.h);
+
+    // Border lines between zones
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(z.x, z.y);
+    ctx.lineTo(z.x, z.y + z.h);
+    ctx.stroke();
+
+    // Top border of zone area
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath();
+    ctx.moveTo(z.x, z.y);
+    ctx.lineTo(z.x + z.w, z.y);
+    ctx.stroke();
+
+    // Icon
+    const iconAlpha = isActive ? 0.8 : 0.3;
+    ctx.globalAlpha = iconAlpha;
+    ctx.font = '44px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(z.icon, z.x + z.w / 2, z.y + z.h * 0.42);
+
+    // Label text below icon
+    ctx.font = 'bold 16px sans-serif';
+    ctx.globalAlpha = isActive ? 0.7 : 0.25;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(z.label, z.x + z.w / 2, z.y + z.h * 0.78);
+
+    ctx.globalAlpha = 1.0;
+  }
+}
 
 // --- AABB Collision ---
 function aabb(a, b) {
@@ -4423,10 +4633,10 @@ function drawPiggy() {
     ctx.rotate(wobble);
   }
 
-  // Scale pulse on damage
-  let scale = 1.0;
+  // Scale pulse on damage + mobile scale
+  let scale = MOBILE_SCALE;
   if (piggyDamageTimer > 0) {
-    scale = 1.0 + 0.15 * Math.sin(piggyDamageTimer / 0.3 * Math.PI);
+    scale = MOBILE_SCALE * (1.0 + 0.15 * Math.sin(piggyDamageTimer / 0.3 * Math.PI));
   }
   ctx.scale(scale, scale);
 
@@ -4504,26 +4714,36 @@ function drawHUD() {
     ctx.fillText(text, x, y);
   }
 
+  // Mobile-adaptive font sizes
+  const mHud = isMobile;
+  const scoreFont = mHud ? 'bold 32px sans-serif' : 'bold 22px sans-serif';
+  const scoreLabelFont = mHud ? 'bold 32px sans-serif' : 'bold 24px sans-serif';
+  const levelFont = mHud ? 'bold 32px sans-serif' : 'bold 22px sans-serif';
+  const timerFont = mHud ? '20px sans-serif' : '14px sans-serif';
+  const lifeFont = mHud ? '32px sans-serif' : '22px sans-serif';
+  const fartFont = mHud ? '28px sans-serif' : '20px sans-serif';
+  const btcFont = mHud ? 'bold 20px sans-serif' : 'bold 14px sans-serif';
+
   // Top-left: Score with bouncing coin icon
   const coinBounce = Math.sin(Math.max(0, scoreBounceFactor) * Math.PI) * 5;
-  hudText('\u{1FA99}', 15, 12 - coinBounce, 'bold 24px sans-serif', '#fff', 'left');
-  hudText(' Score: ' + game.score, 38, 14, 'bold 22px sans-serif', '#fff', 'left');
+  hudText('\u{1FA99}', 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
+  hudText(' Score: ' + game.score, mHud ? 48 : 38, 14, scoreFont, '#fff', 'left');
 
   // Top-center: Level with rounded background
   ctx.textAlign = 'center';
   const levelText = 'Level ' + game.level;
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = levelFont;
   const levelTextW = ctx.measureText(levelText).width;
   // Rounded background pill
   const pillX = WIDTH / 2 - levelTextW / 2 - 14;
   const pillY = 8;
   const pillW = levelTextW + 28;
-  const pillH = 28;
+  const pillH = mHud ? 38 : 28;
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
   ctx.roundRect(pillX, pillY, pillW, pillH, 14);
   ctx.fill();
-  hudText(levelText, WIDTH / 2, 10, 'bold 22px sans-serif', '#fff', 'center');
+  hudText(levelText, WIDTH / 2, 10, levelFont, '#fff', 'center');
 
   // Timer bar below level text
   if (game.levelConfig) {
@@ -4555,16 +4775,17 @@ function drawHUD() {
     ctx.stroke();
 
     // Time remaining
-    hudText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, 54, '14px sans-serif', 'rgba(255,255,255,0.8)', 'center');
+    hudText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, mHud ? 58 : 54, timerFont, 'rgba(255,255,255,0.8)', 'center');
   }
 
   // Top-right: Crack indicator with piggy icons
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   const crackStartX = WIDTH - 15;
-  ctx.font = '22px sans-serif';
+  ctx.font = lifeFont;
+  const crackSpacing = mHud ? 36 : 28;
   for (let i = 0; i < 3; i++) {
-    const cx = crackStartX - (2 - i) * 28;
+    const cx = crackStartX - (2 - i) * crackSpacing;
     if (i < game.cracks) {
       // Cracked piggy (broken heart)
       ctx.globalAlpha = 0.9;
@@ -4582,8 +4803,8 @@ function drawHUD() {
   ctx.globalAlpha = 1.0;
 
   // Fart meter (below score)
-  const fartY = 48;
-  hudText('\u{1F4A8} ', 15, fartY, '20px sans-serif', '#88cc44', 'left');
+  const fartY = mHud ? 56 : 48;
+  hudText('\u{1F4A8} ', 15, fartY, fartFont, '#88cc44', 'left');
   for (let i = 0; i < MAX_FARTS; i++) {
     const fx = 42 + i * 22;
     if (i < fartCharges) {
@@ -4633,13 +4854,14 @@ function drawHUD() {
   }
 
   // BTC display (below fart meter)
-  ctx.font = 'bold 14px sans-serif';
+  const btcY = mHud ? 90 : 75;
+  ctx.font = btcFont;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('\u20BF ' + playerBTC, 16, 76);
+  ctx.fillText('\u20BF ' + playerBTC, 16, btcY + 1);
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('\u20BF ' + playerBTC, 15, 75);
+  ctx.fillText('\u20BF ' + playerBTC, 15, btcY);
 
   // Player name (top-right, below crack indicators)
   if (playerName) {
@@ -5891,59 +6113,60 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
-  // Falling objects
+  // Falling objects (scaled for mobile)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const now = performance.now() / 1000;
+  const ms = MOBILE_SCALE; // visual scale multiplier
   for (const obj of objects) {
     if (obj.type === 'coin' && obj.coinType) {
-      // Draw custom coin graphics
+      // Draw custom coin graphics (scale via save/restore)
+      ctx.save();
+      ctx.translate(obj.x, obj.y);
+      ctx.scale(ms, ms);
+      ctx.translate(-obj.x, -obj.y);
       drawCoin(obj.x, obj.y, obj.width, obj.coinType, now);
+      ctx.restore();
     } else if (obj.type === 'special') {
       // Bills and moneybags - emoji with golden glow
-      const sz = obj.width || 42;
+      const sz = Math.round((obj.width || 42) * ms);
       ctx.font = sz + 'px sans-serif';
-      // Glowing aura
       const glowPulse = 12 + 6 * Math.sin(now * 6 + obj.x);
       ctx.shadowColor = obj.value >= 30 ? '#ff8800' : '#44cc44';
       ctx.shadowBlur = glowPulse;
-      // Slight floating bob
       const bob = Math.sin(now * 3 + obj.x * 0.05) * 3;
       ctx.fillText(obj.emoji, obj.x, obj.y + bob);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'bomb') {
-      ctx.font = '36px sans-serif';
-      // Pulsing glow on bombs
+      ctx.font = Math.round(36 * ms) + 'px sans-serif';
       const pulseR = 20 + 5 * Math.sin(now * 10);
       ctx.shadowColor = '#ff4400';
       ctx.shadowBlur = pulseR;
       ctx.fillText(obj.emoji, obj.x, obj.y);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'corn') {
-      ctx.font = '32px sans-serif';
+      ctx.font = Math.round(32 * ms) + 'px sans-serif';
       const cornGlow = 8 + 4 * Math.sin(now * 5);
       ctx.shadowColor = '#ffcc00';
       ctx.shadowBlur = cornGlow;
       ctx.fillText(obj.emoji, obj.x, obj.y);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'butcher') {
-      ctx.font = (obj.width || 50) + 'px sans-serif';
-      // Menacing red glow
+      ctx.font = Math.round((obj.width || 50) * ms) + 'px sans-serif';
       const glowPulse = 8 + 4 * Math.sin(now * 4);
       ctx.shadowColor = '#cc0000';
       ctx.shadowBlur = glowPulse;
       ctx.fillText(obj.emoji, obj.x, obj.y);
-      // Draw knives on sides
-      ctx.font = '18px sans-serif';
-      ctx.fillText('\u{1F52A}', obj.x - 22, obj.y - 10);
-      ctx.fillText('\u{1F52A}', obj.x + 22, obj.y - 10);
+      ctx.font = Math.round(18 * ms) + 'px sans-serif';
+      ctx.fillText('\u{1F52A}', obj.x - 22 * ms, obj.y - 10);
+      ctx.fillText('\u{1F52A}', obj.x + 22 * ms, obj.y - 10);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'devil') {
-      const dSize = obj.width || 38;
+      const dSize = Math.round((obj.width || 38) * ms);
       ctx.font = dSize + 'px sans-serif';
       ctx.fillText(obj.emoji, obj.x, obj.y);
     } else {
-      ctx.font = '32px sans-serif';
+      ctx.font = Math.round(32 * ms) + 'px sans-serif';
       ctx.fillText(obj.emoji || '', obj.x, obj.y);
     }
   }
@@ -6007,7 +6230,7 @@ function drawPlayingScene() {
   // Draw poops with stink waves (behind enemies)
   for (const poop of poops) {
     ctx.save();
-    ctx.font = '28px sans-serif';
+    ctx.font = Math.round(28 * ms) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('\u{1F4A9}', poop.x, poop.y);
@@ -6025,19 +6248,25 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
-  // Ground enemies
+  // Ground enemies (scaled for mobile)
   for (const e of groundEnemies) {
     if (e.type === 'wolf') {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
       drawWolf(e.x, e.y, e.dir, e.animTimer);
+      ctx.restore();
     } else if (e.type === 'carnivore') {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
       drawCarnivoreSprite(e.x, e.y, e.dir, e.animTimer);
+      ctx.restore();
     } else if (e.type === 'farmer') {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
       drawFarmerSprite(e.x, e.y, e.dir, e.animTimer);
+      ctx.restore();
     } else {
       // Fox keeps emoji for now
       ctx.save();
       ctx.translate(e.x, e.y);
-      if (e.dir < 0) ctx.scale(-1, 1);
+      ctx.scale(ms * (e.dir < 0 ? -1 : 1), ms);
       const bob = Math.sin(e.animTimer * 8) * 3;
       ctx.font = `${e.width}px sans-serif`;
       ctx.textAlign = 'center';
@@ -6349,6 +6578,11 @@ function drawPlayingScene() {
   }
 
   ctx.restore(); // restore screen shake transform
+
+  // Mobile touch zones drawn on canvas (outside shake transform)
+  if (isMobile && game.screen === 'playing') {
+    drawMobileTouchZones();
+  }
 
   // HUD drawn outside shake transform so it stays stable
   drawHUD();
@@ -7109,14 +7343,19 @@ function gameLoop(timestamp) {
   // Show/hide mobile controls based on game state
   const pauseBtnEl = document.getElementById('pauseBtn');
   if (isMobile) {
+    // DOM touch buttons are always hidden - canvas zones replace them
+    touchControlsEl.classList.remove('visible');
     if (game.screen === 'playing') {
-      touchControlsEl.classList.add('visible');
       pauseBtnEl.style.display = 'block';
     } else {
-      touchControlsEl.classList.remove('visible');
       pauseBtnEl.style.display = 'none';
       // Release all keys when leaving playing state
       Object.keys(keys).forEach(k => keys[k] = false);
+      // Clear canvas touch state
+      for (const tid in canvasTouches) delete canvasTouches[tid];
+      for (const zid in activeZones) delete activeZones[zid];
+      shakeZoneHeld = false;
+      if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
     }
   }
 
