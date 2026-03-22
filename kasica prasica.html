@@ -133,11 +133,13 @@ const game = {
 // --- Player ---
 const player = {
   x: WIDTH / 2,
-  y: HEIGHT - 80,
-  width: 60,
-  height: 60,
+  y: HEIGHT - 70,
+  width: 70,
+  height: 50,
   speed: 300,
-  emoji: '\u{1F437}'
+  emoji: '\u{1F437}',
+  facing: 0,
+  facingSmooth: 0
 };
 
 // --- Falling Objects ---
@@ -1297,6 +1299,8 @@ function startLevel() {
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
+  player.facing = 0;
+  player.facingSmooth = 0;
 
   game.screen = 'playing';
   startMusic();
@@ -1533,10 +1537,16 @@ function update(dt) {
   // Player movement
   if (keys['ArrowLeft']) {
     player.x -= player.speed * dt;
+    player.facing = -1;
   }
   if (keys['ArrowRight']) {
     player.x += player.speed * dt;
+    player.facing = 1;
   }
+  if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
+    player.facing = 0;
+  }
+  player.facingSmooth += (player.facing - player.facingSmooth) * 8 * dt;
   const halfW = player.width / 2;
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
@@ -1633,7 +1643,7 @@ function update(dt) {
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
     devil.x = player.x;
-    devil.y = player.y - 45;
+    devil.y = player.y - 40;
     devil.hammerTimer += dt;
     devil.hammerAnimTimer += dt;
     shakeHintTimer += dt;
@@ -1811,7 +1821,7 @@ function update(dt) {
             emoji: obj.emoji,
             devilType: obj.devilType || 'fast',
             x: player.x,
-            y: player.y - 45,
+            y: player.y - 40,
             width: obj.width,
             height: obj.height,
             hammerTimer: 0,
@@ -1844,7 +1854,7 @@ function update(dt) {
             emoji: obj.emoji,
             devilType: 'butcher',
             x: player.x,
-            y: player.y - 50,
+            y: player.y - 45,
             width: obj.width,
             height: obj.height,
             hammerTimer: 0,
@@ -1958,10 +1968,144 @@ function drawGround() {
   ctx.globalAlpha = 1.0;
 }
 
-function drawPiggy() {
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+function drawPiggySprite(x, y, facing, state) {
+  ctx.save();
+  ctx.translate(x, y);
 
+  // Flip based on direction (default faces right)
+  const dir = facing >= 0 ? 1 : -1;
+  ctx.scale(dir, 1);
+
+  // State-based modifiers
+  let bodyColor = '#FFB6C1';
+  let bodyDark = '#FF9CAD';
+  if (state === 'scared') {
+    bodyColor = '#FFD0D0';
+  } else if (state === 'happy') {
+    bodyColor = '#FFB0D0';
+  } else if (state === 'farting') {
+    bodyColor = '#CCFF99';
+  }
+
+  // BODY - oval shape
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 28, 20, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Darker bottom half for 3D effect
+  ctx.fillStyle = bodyDark;
+  ctx.beginPath();
+  ctx.ellipse(0, 5, 26, 12, 0, 0, Math.PI);
+  ctx.fill();
+
+  // COIN SLOT on top
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-8, -22, 16, 3);
+  ctx.fillStyle = '#555';
+  ctx.fillRect(-6, -21, 12, 1);
+
+  // LEGS (2 front, 2 back - offset for depth)
+  ctx.fillStyle = '#FF9CAD';
+  // Back legs (slightly behind)
+  ctx.fillRect(-15, 12, 7, 12);
+  ctx.fillRect(8, 12, 7, 12);
+  // Front legs (slightly in front, darker)
+  ctx.fillStyle = bodyDark;
+  ctx.fillRect(-18, 14, 7, 12);
+  ctx.fillRect(11, 14, 7, 12);
+  // Hooves
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(-18, 24, 7, 3);
+  ctx.fillRect(11, 24, 7, 3);
+  ctx.fillRect(-15, 22, 7, 3);
+  ctx.fillRect(8, 22, 7, 3);
+
+  // TAIL (curly!) - at the back
+  ctx.strokeStyle = '#FF9CAD';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-28, -5);
+  ctx.quadraticCurveTo(-35, -15, -30, -18);
+  ctx.quadraticCurveTo(-25, -21, -32, -12);
+  ctx.stroke();
+
+  // HEAD/SNOUT - protruding from front
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.arc(25, -5, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Snout (protruding oval)
+  ctx.fillStyle = '#FFa0b0';
+  ctx.beginPath();
+  ctx.ellipse(35, -2, 9, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Nostrils
+  ctx.fillStyle = '#c06070';
+  ctx.beginPath();
+  ctx.ellipse(33, -3, 2, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(37, -3, 2, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // EYES
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(28, -10, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // Black pupil (moves slightly with facing)
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(29 + dir * 1, -10, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye highlight
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(30, -11.5, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Scared state: sweat drop, wider eyes
+  if (state === 'scared') {
+    ctx.fillStyle = '#66ccff';
+    ctx.beginPath();
+    ctx.moveTo(22, -18);
+    ctx.quadraticCurveTo(20, -13, 22, -12);
+    ctx.quadraticCurveTo(24, -13, 22, -18);
+    ctx.fill();
+  }
+
+  // EARS - pointed triangles on top of head
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.moveTo(19, -16);
+  ctx.lineTo(17, -28);
+  ctx.lineTo(25, -18);
+  ctx.closePath();
+  ctx.fill();
+  // Inner ear
+  ctx.fillStyle = '#FF8CA0';
+  ctx.beginPath();
+  ctx.moveTo(20, -17);
+  ctx.lineTo(18.5, -25);
+  ctx.lineTo(24, -18);
+  ctx.closePath();
+  ctx.fill();
+
+  // Second ear (behind, slightly visible)
+  ctx.fillStyle = bodyDark;
+  ctx.beginPath();
+  ctx.moveTo(22, -16);
+  ctx.lineTo(22, -27);
+  ctx.lineTo(28, -17);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawPiggy() {
   const bobOffset = Math.sin(piggyBobTimer * 3) * 2; // subtle idle bob
   const drawY = player.y + shakeVisualOffset + bobOffset;
 
@@ -1986,8 +2130,11 @@ function drawPiggy() {
     ctx.globalAlpha = 0.7;
   }
 
-  ctx.font = '48px sans-serif';
-  ctx.fillText(player.emoji, 0, 0);
+  // Determine piggy state
+  const piggyState = game.latchedDevil ? 'scared' : piggyDamageTimer > 0 ? 'scared' : 'normal';
+
+  // Draw the hand-drawn piggy sprite
+  drawPiggySprite(0, 0, player.facingSmooth, piggyState);
   ctx.globalAlpha = 1.0;
 
   // Draw crack lines
