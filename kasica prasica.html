@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="screen-orientation" content="landscape">
+<link rel="manifest" href="manifest.json">
 <title>Kasica Prasica</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -202,13 +208,23 @@ window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 10
 
 function toggleFullscreen() {
   const elem = document.documentElement;
-  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-    // Try standard Fullscreen API first
+
+  // Check if already fullscreen
+  const isFS = document.fullscreenElement || document.webkitFullscreenElement;
+
+  if (!isFS) {
+    // Try standard Fullscreen API (works on Android Chrome, desktop)
     if (elem.requestFullscreen) {
-      elem.requestFullscreen().catch(() => {});
+      elem.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+        // Fallback: try webkit version
+        if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        else fakeFullscreen();
+      });
     } else if (elem.webkitRequestFullscreen) {
-      // Safari/iOS older versions
       elem.webkitRequestFullscreen();
+    } else {
+      // iOS Safari: no Fullscreen API - use fake fullscreen
+      fakeFullscreen();
     }
   } else {
     if (document.exitFullscreen) {
@@ -219,15 +235,96 @@ function toggleFullscreen() {
   }
 }
 
+// Fake fullscreen for iOS Safari - scroll to hide address bar + lock orientation hint
+let isFakeFS = false;
+function fakeFullscreen() {
+  if (isFakeFS) {
+    // Exit fake fullscreen
+    isFakeFS = false;
+    document.body.style.height = '';
+    document.body.style.overflow = '';
+    window.scrollTo(0, 0);
+    return;
+  }
+  isFakeFS = true;
+  // Scroll trick to hide Safari address bar
+  document.body.style.height = '100.1vh';
+  document.body.style.overflow = 'hidden';
+  window.scrollTo(0, 1);
+  setTimeout(() => {
+    window.scrollTo(0, 0);
+    document.body.style.height = '100vh';
+  }, 100);
+
+  // Try to lock screen orientation to landscape if available
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
+
+// Detect iOS Safari (no Fullscreen API support)
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = window.navigator.standalone === true ||
+  window.matchMedia('(display-mode: fullscreen)').matches ||
+  window.matchMedia('(display-mode: standalone)').matches;
+
+// Show iOS "Add to Home Screen" hint using safe DOM methods
+function showIOSHint() {
+  const hint = document.createElement('div');
+  hint.id = 'iosHint';
+  hint.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;' +
+    'background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;' +
+    'flex-direction:column;color:white;font-size:18px;text-align:center;padding:20px;';
+
+  const icon = document.createElement('div');
+  icon.style.cssText = 'font-size:48px;margin-bottom:15px';
+  icon.textContent = '\u{1F4F1}';
+  hint.appendChild(icon);
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:22px;font-weight:bold;margin-bottom:10px';
+  title.textContent = 'Pun ekran na iPhone/iPad';
+  hint.appendChild(title);
+
+  const msg1 = document.createElement('div');
+  msg1.style.cssText = 'margin-bottom:8px';
+  msg1.textContent = 'Pritisni \u2B06\uFE0F (Share) dugme';
+  hint.appendChild(msg1);
+
+  const msg2 = document.createElement('div');
+  msg2.style.cssText = 'margin-bottom:15px;font-weight:bold';
+  msg2.textContent = 'pa izaberi "Add to Home Screen"';
+  hint.appendChild(msg2);
+
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:14px;color:#aaa;margin-bottom:20px';
+  sub.textContent = 'Igrica \u0107e se otvoriti bez browser trake!';
+  hint.appendChild(sub);
+
+  const btn = document.createElement('button');
+  btn.style.cssText = 'padding:12px 30px;font-size:18px;border-radius:8px;border:none;' +
+    'background:#FFD700;color:#000;font-weight:bold;cursor:pointer';
+  btn.textContent = 'OK, razumem';
+  btn.addEventListener('click', function() { hint.remove(); });
+  hint.appendChild(btn);
+
+  document.body.appendChild(hint);
+}
+
 // Fullscreen button - use touchend for mobile (required for user gesture)
 const fsBtn = document.getElementById('fullscreenBtn');
 fsBtn.addEventListener('touchend', function(e) {
   e.preventDefault();
   e.stopPropagation();
-  toggleFullscreen();
+  if (isIOS && !isStandalone && !document.fullscreenElement) {
+    fakeFullscreen();
+    showIOSHint();
+  } else {
+    toggleFullscreen();
+  }
 }, { passive: false });
 fsBtn.addEventListener('click', function(e) {
-  // Desktop click fallback (touchend already handles mobile)
   if (!('ontouchstart' in window)) toggleFullscreen();
 });
 
