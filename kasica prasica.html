@@ -73,6 +73,16 @@
     width: 58px; height: 58px;
     font-size: 24px;
   }
+  .touch-btn.poop-btn {
+    width: 60px; height: 60px;
+    font-size: 28px;
+    background: rgba(136, 102, 0, 0.25);
+    border-color: rgba(136, 102, 0, 0.6);
+  }
+  .touch-btn.poop-btn.active {
+    background: rgba(136, 102, 0, 0.5);
+    border-color: rgba(136, 102, 0, 0.9);
+  }
 </style>
 </head>
 <body>
@@ -82,6 +92,7 @@
 <div id="touchControls">
   <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
   <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
+  <div class="touch-btn poop-btn" id="btnPoop" data-key="Poop">&#128169;</div>
   <div class="shake-col">
     <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
@@ -266,6 +277,14 @@ const MAX_FARTS = 5;
 const fartClouds = [];         // active fart clouds flying upward
 let fartCooldown = 0;          // prevent spam (0.5s cooldown)
 const chokingDevils = [];      // devils that got farted on (dying animation)
+
+// --- Poop Mechanic ---
+const poops = [];
+let poopCooldown = 0;
+const POOP_COOLDOWN = 8;
+const POOP_DURATION = 10;
+let isPooping = false;
+let poopAnimTimer = 0;
 
 // --- Particle System ---
 const particles = [];
@@ -1183,6 +1202,38 @@ function playChokingSound() {
   } catch(e) {}
 }
 
+function playPoopSound() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+    // Low squelchy sound
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+
+    // Add a "plop" noise
+    const noise = ctx.createOscillator();
+    const noiseGain = ctx.createGain();
+    noise.type = 'sine';
+    noise.frequency.setValueAtTime(150, t + 0.1);
+    noise.frequency.exponentialRampToValueAtTime(60, t + 0.25);
+    noiseGain.gain.setValueAtTime(0.2, t + 0.1);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+    noise.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(t + 0.1);
+    noise.stop(t + 0.3);
+  } catch(e) {}
+}
+
 // --- Background Music System ---
 let musicPlaying = false;
 let musicNodes = null;
@@ -1775,6 +1826,10 @@ function startLevel() {
   lightningSpawnTimer = 5;
   groundEnemies.length = 0;
   groundEnemySpawnTimer = 3;
+  poops.length = 0;
+  poopCooldown = 0;
+  isPooping = false;
+  poopAnimTimer = 0;
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
@@ -2260,6 +2315,32 @@ function update(dt) {
   // Update fart cooldown
   if (fartCooldown > 0) fartCooldown -= dt;
 
+  // Poop: both LEFT and RIGHT held simultaneously while grounded (or mobile Poop button)
+  if ((keys['ArrowLeft'] && keys['ArrowRight'] || keys['Poop']) && player.grounded && poopCooldown <= 0 && !isPooping) {
+    isPooping = true;
+    poopAnimTimer = 0.6;
+  }
+
+  if (isPooping) {
+    poopAnimTimer -= dt;
+    if (poopAnimTimer <= 0) {
+      isPooping = false;
+      poopCooldown = POOP_COOLDOWN;
+      poops.push({
+        x: player.x,
+        y: HEIGHT - 35,
+        width: 30,
+        height: 25,
+        life: POOP_DURATION,
+        stinkTimer: 0
+      });
+      playPoopSound();
+      spawnParticles(player.x, HEIGHT - 35, '\u{1F4A9}', 3, 50);
+      triggerScreenShake(4, 0.2);
+    }
+  }
+  poopCooldown = Math.max(0, poopCooldown - dt);
+
   // Update fart clouds
   for (let i = fartClouds.length - 1; i >= 0; i--) {
     const cloud = fartClouds[i];
@@ -2721,6 +2802,32 @@ function update(dt) {
       spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
     }
   }
+
+  // Update poops and check collision with ground enemies
+  for (let p = poops.length - 1; p >= 0; p--) {
+    const poop = poops[p];
+    poop.life -= dt;
+    poop.stinkTimer += dt;
+    if (poop.life <= 0) { poops.splice(p, 1); continue; }
+
+    for (let e = groundEnemies.length - 1; e >= 0; e--) {
+      if (aabb(poop, groundEnemies[e])) {
+        const enemy = groundEnemies[e];
+        chokingDevils.push({
+          emoji: enemy.emoji,
+          x: enemy.x, y: enemy.y,
+          width: enemy.width,
+          timer: 2.0, coughTimer: 0,
+          opacity: 1.0, greenTint: 1.0
+        });
+        groundEnemies.splice(e, 1);
+        playChokingSound();
+        spawnParticles(enemy.x, enemy.y, '\u{1F922}', 4, 100);
+        spawnParticles(enemy.x, enemy.y, '\u{1F4A9}', 2, 60);
+        spawnScorePopup(enemy.x, enemy.y, '\u{1F480}\u{1F4A9}', '#885500');
+      }
+    }
+  }
 }
 
 // --- Draw ---
@@ -2924,7 +3031,8 @@ function drawPiggySprite(x, y, facing, state) {
 
 function drawPiggy() {
   const bobOffset = Math.sin(piggyBobTimer * 3) * 2; // subtle idle bob
-  const drawY = player.y + shakeVisualOffset + bobOffset;
+  const poopSquat = isPooping ? 8 : 0; // squat down when pooping
+  const drawY = player.y + shakeVisualOffset + bobOffset + poopSquat;
 
   ctx.save();
   ctx.translate(player.x, drawY);
@@ -2947,12 +3055,27 @@ function drawPiggy() {
     ctx.globalAlpha = 0.7;
   }
 
+  // Strained red tint when pooping
+  if (isPooping) {
+    ctx.globalAlpha = 0.85;
+  }
+
   // Determine piggy state
-  const piggyState = game.latchedDevil ? 'scared' : piggyDamageTimer > 0 ? 'scared' : 'normal';
+  const piggyState = game.latchedDevil ? 'scared' : piggyDamageTimer > 0 ? 'scared' : isPooping ? 'scared' : 'normal';
 
   // Draw the hand-drawn piggy sprite
   drawPiggySprite(0, 0, player.facingSmooth, piggyState);
   ctx.globalAlpha = 1.0;
+
+  // Red strain overlay when pooping
+  if (isPooping) {
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#cc3300';
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+  }
 
   // Draw crack lines
   if (game.cracks >= 1) {
@@ -3107,6 +3230,26 @@ function drawHUD() {
     if (blink) {
       hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
+  }
+
+  // Poop cooldown indicator
+  if (poopCooldown > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(WIDTH - 90, 95, 80, 12);
+    ctx.fillStyle = '#886600';
+    ctx.fillRect(WIDTH - 90, 95, 80 * (1 - poopCooldown / POOP_COOLDOWN), 12);
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9} ' + Math.ceil(poopCooldown) + 's', WIDTH - 50, 101);
+  } else if (game.level >= 3) {
+    // Show ready indicator when poop is available (from level 3+)
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#886600';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9} OK', WIDTH - 50, 101);
   }
 }
 
@@ -4164,6 +4307,27 @@ function drawPlayingScene() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(e.emoji, 0, bob);
+    ctx.restore();
+  }
+
+  // Draw poops with stink waves
+  for (const poop of poops) {
+    ctx.save();
+    ctx.font = '28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
+    // Green stink waves rising
+    const alpha = poop.life / POOP_DURATION;
+    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const ox = Math.sin(poop.stinkTimer * 2 + i * 2) * 10;
+      ctx.moveTo(poop.x - 15 + ox, poop.y - 10 - i * 12);
+      ctx.quadraticCurveTo(poop.x + ox, poop.y - 20 - i * 12, poop.x + 15 + ox, poop.y - 10 - i * 12);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
