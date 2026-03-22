@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kasica Prasica</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -17,11 +17,67 @@
   canvas {
     display: block;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+    touch-action: none; /* prevent browser gestures on canvas */
+  }
+  /* Mobile touch controls overlay */
+  #touchControls {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 140px;
+    pointer-events: none;
+    z-index: 100;
+  }
+  #touchControls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 10px 15px; }
+  .touch-btn {
+    pointer-events: auto;
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.15);
+    color: white;
+    font-size: 28px;
+    display: flex; align-items: center; justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.1s;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .touch-btn.active {
+    background: rgba(255,255,255,0.4);
+    border-color: rgba(255,255,255,0.9);
+    transform: scale(0.92);
+  }
+  .dpad { display: flex; gap: 6px; align-items: center; }
+  .dpad-col { display: flex; flex-direction: column; gap: 6px; }
+  .actions { display: flex; gap: 8px; align-items: flex-end; }
+  .actions .touch-btn.fart-btn {
+    width: 72px; height: 72px;
+    font-size: 32px;
+    background: rgba(100,200,50,0.25);
+    border-color: rgba(100,200,50,0.6);
   }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
+
+<!-- Mobile virtual gamepad -->
+<div id="touchControls">
+  <div class="dpad">
+    <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
+    <div class="dpad-col">
+      <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
+      <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
+    </div>
+    <div class="touch-btn" id="btnRight" data-key="ArrowRight">&#9654;</div>
+  </div>
+  <div class="actions">
+    <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
+  </div>
+</div>
+
 <script>
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -1803,6 +1859,107 @@ canvas.addEventListener('click', () => {
 window.addEventListener('keyup', (e) => {
   keys[e.key] = false;
 });
+
+// --- Mobile Touch Controls ---
+const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+const touchControlsEl = document.getElementById('touchControls');
+if (isMobile) touchControlsEl.classList.add('visible');
+
+// Track active touches per button
+const activeTouches = {};
+
+function simulateKeyDown(keyName) {
+  // Simulate the same keydown event the keyboard handler uses
+  const fakeEvent = { key: keyName, preventDefault: () => {} };
+  // Set key state
+  keys[keyName] = true;
+
+  // Handle shake detection for latched devil
+  if (game.latchedDevil && game.screen === 'playing') {
+    if (keyName === 'ArrowUp' && lastShakeKey !== 'up') {
+      game.latchedDevil.shakeProgress++;
+      lastShakeKey = 'up';
+      shakeVisualOffset = -5;
+      shakeVisualTimer = 0.08;
+      playShakeSound();
+    } else if (keyName === 'ArrowDown' && lastShakeKey !== 'down') {
+      game.latchedDevil.shakeProgress++;
+      lastShakeKey = 'down';
+      shakeVisualOffset = 5;
+      shakeVisualTimer = 0.08;
+      playShakeSound();
+    }
+  }
+
+  // Handle fart on space
+  if (keyName === ' ' && game.screen === 'playing') {
+    if (fartCharges > 0 && fartCooldown <= 0) {
+      fartCharges--;
+      fartCooldown = 0.5;
+      fartClouds.push({
+        x: player.x, y: player.y + 15,
+        width: 50, height: 40,
+        vy: -250, life: 2.0, opacity: 0.8, scale: 1.0, wobble: 0
+      });
+      playFartSound();
+      spawnParticles(player.x, player.y + 20, '\u{1F4A8}', 5, 80);
+      spawnParticles(player.x, player.y + 15, '\u{1F49A}', 3, 60);
+      triggerScreenShake(3, 0.15);
+    }
+  }
+}
+
+function simulateKeyUp(keyName) {
+  keys[keyName] = false;
+}
+
+// Setup touch handlers for each button
+document.querySelectorAll('.touch-btn').forEach(btn => {
+  const keyName = btn.dataset.key;
+
+  btn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    unlockAudio();
+    // Track this touch
+    for (const touch of e.changedTouches) {
+      activeTouches[touch.identifier] = keyName;
+    }
+    btn.classList.add('active');
+    simulateKeyDown(keyName);
+  }, { passive: false });
+
+  btn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      delete activeTouches[touch.identifier];
+    }
+    // Only release key if no other touch is holding this button
+    const stillHeld = Object.values(activeTouches).includes(keyName);
+    if (!stillHeld) {
+      btn.classList.remove('active');
+      simulateKeyUp(keyName);
+    }
+  }, { passive: false });
+
+  btn.addEventListener('touchcancel', (e) => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      delete activeTouches[touch.identifier];
+    }
+    btn.classList.remove('active');
+    simulateKeyUp(keyName);
+  }, { passive: false });
+});
+
+// Also handle tapping the canvas on mobile for menu navigation
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  unlockAudio();
+  if (game.screen !== 'playing') {
+    // Simulate a click for menu screens
+    canvas.dispatchEvent(new MouseEvent('click'));
+  }
+}, { passive: false });
 
 // --- AABB Collision ---
 function aabb(a, b) {
@@ -4272,6 +4429,18 @@ function gameLoop(timestamp) {
 
   update(dt);
   draw();
+
+  // Show/hide mobile controls based on game state
+  if (isMobile) {
+    if (game.screen === 'playing') {
+      touchControlsEl.classList.add('visible');
+    } else {
+      touchControlsEl.classList.remove('visible');
+      // Release all keys when leaving playing state
+      Object.keys(keys).forEach(k => keys[k] = false);
+    }
+  }
+
   requestAnimationFrame(gameLoop);
 }
 
