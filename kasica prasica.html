@@ -4292,7 +4292,8 @@ function drawGameOver() {
   // Rotating roast pig
   ctx.save();
   ctx.translate(spitCenterX, spitCenterY);
-  ctx.rotate(rotAngle);
+  const yScale = Math.cos(rotAngle);
+  ctx.scale(1, yScale); // Compress vertically to simulate spit rotation
 
   // Roasted body (darker, golden-brown)
   const roastColor = '#C8852A';
@@ -4319,24 +4320,24 @@ function drawGameOver() {
   // Head
   ctx.fillStyle = roastColor;
   ctx.beginPath();
-  ctx.arc(50, 0, 18, 0, Math.PI * 2);
+  ctx.arc(55, 0, 24, 0, Math.PI * 2);
   ctx.fill();
   // Snout
   ctx.fillStyle = roastDark;
   ctx.beginPath();
-  ctx.ellipse(64, 2, 8, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(76, 3, 11, 8, 0, 0, Math.PI * 2);
   ctx.fill();
   // Closed X eyes (it's roasted!)
   ctx.strokeStyle = '#4A2500';
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(48, -6); ctx.lineTo(54, -1); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(54, -6); ctx.lineTo(48, -1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(53, -8); ctx.lineTo(59, -3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(59, -8); ctx.lineTo(53, -3); ctx.stroke();
   // Ear
   ctx.fillStyle = '#A06820';
   ctx.beginPath();
-  ctx.moveTo(44, -14);
-  ctx.lineTo(40, -26);
-  ctx.lineTo(50, -16);
+  ctx.moveTo(49, -18);
+  ctx.lineTo(45, -32);
+  ctx.lineTo(55, -20);
   ctx.closePath();
   ctx.fill();
 
@@ -4363,19 +4364,19 @@ function drawGameOver() {
   // Apple in mouth!
   ctx.fillStyle = '#cc2222';
   ctx.beginPath();
-  ctx.arc(70, 3, 6, 0, Math.PI * 2);
+  ctx.arc(85, 4, 9, 0, Math.PI * 2);
   ctx.fill();
   // Apple stem
   ctx.strokeStyle = '#4a2200';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(70, -3);
-  ctx.lineTo(71, -7);
+  ctx.moveTo(85, -5);
+  ctx.lineTo(86, -10);
   ctx.stroke();
   // Apple highlight
   ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.beginPath();
-  ctx.arc(68, 1, 2, 0, Math.PI * 2);
+  ctx.arc(83, 2, 2, 0, Math.PI * 2);
   ctx.fill();
 
   // Spit pole through the pig
@@ -4383,7 +4384,7 @@ function drawGameOver() {
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(-70, 0);
-  ctx.lineTo(80, 0);
+  ctx.lineTo(100, 0);
   ctx.stroke();
 
   ctx.restore();
