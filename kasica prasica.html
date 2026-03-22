@@ -367,18 +367,42 @@ function drawScorePopups() {
   ctx.lineWidth = 1;
 }
 
-// --- Background Clouds ---
-const clouds = [
-  { x: 100, y: 60, speed: 12, size: 36 },
-  { x: 350, y: 100, speed: 18, size: 42 },
-  { x: 600, y: 40, speed: 10, size: 32 },
-  { x: 200, y: 130, speed: 15, size: 38 }
-];
+// --- Sky & Weather ---
+const skyClouds = [];
+for (let i = 0; i < 5; i++) {
+  skyClouds.push({
+    x: Math.random() * WIDTH,
+    y: 30 + Math.random() * 80,
+    w: 80 + Math.random() * 60,
+    speed: 10 + Math.random() * 20,
+    opacity: 0.5 + Math.random() * 0.3
+  });
+}
+
+// --- Lightning ---
+const lightningBolts = [];
+let lightningWarning = null;
+let lightningSpawnTimer = 5;
+
+function generateLightningSegments(startX, startY, endY) {
+  const segments = [];
+  let x = startX;
+  let y = startY;
+  const step = 30;
+  while (y < endY) {
+    const nextX = x + (Math.random() - 0.5) * 40;
+    const nextY = Math.min(y + step, endY);
+    segments.push({ x1: x, y1: y, x2: nextX, y2: nextY });
+    x = nextX;
+    y = nextY;
+  }
+  return segments;
+}
 
 function updateClouds(dt) {
-  for (const c of clouds) {
-    c.x += c.speed * dt;
-    if (c.x > WIDTH + 50) c.x = -50;
+  for (const cloud of skyClouds) {
+    cloud.x += cloud.speed * dt;
+    if (cloud.x > WIDTH + cloud.w) cloud.x = -cloud.w;
   }
 }
 
@@ -1735,6 +1759,9 @@ function startLevel() {
   shakeVisualTimer = 0;
   screenShake.intensity = 0;
   screenShake.duration = 0;
+  lightningBolts.length = 0;
+  lightningWarning = null;
+  lightningSpawnTimer = 5;
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
@@ -2561,6 +2588,53 @@ function update(dt) {
       objects.splice(i, 1);
     }
   }
+
+  // --- Lightning System (Level 4+) ---
+  if (game.level >= 4) {
+    lightningSpawnTimer -= dt;
+    if (lightningSpawnTimer <= 0 && !lightningWarning) {
+      lightningSpawnTimer = 5 + Math.random() * 3;
+      const cloud = skyClouds[Math.floor(Math.random() * skyClouds.length)];
+      lightningWarning = { x: cloud.x + cloud.w * 0.25, y: cloud.y + 20, timer: 1.0 };
+    }
+
+    if (lightningWarning) {
+      lightningWarning.timer -= dt;
+      if (lightningWarning.timer <= 0) {
+        lightningBolts.push({
+          x: lightningWarning.x,
+          y: lightningWarning.y,
+          bottomY: lightningWarning.y,
+          width: 20,
+          height: 30,
+          speed: 800,
+          segments: generateLightningSegments(lightningWarning.x, lightningWarning.y, HEIGHT - 30),
+          life: 0.3,
+          flash: 1.0
+        });
+        lightningWarning = null;
+        triggerScreenShake(5, 0.2);
+      }
+    }
+
+    // Update lightning bolts
+    for (let i = lightningBolts.length - 1; i >= 0; i--) {
+      const bolt = lightningBolts[i];
+      bolt.life -= dt;
+      bolt.flash -= dt * 3;
+
+      // Collision with player (check if any segment is near player)
+      if (bolt.life > 0.15) { // Only damage on initial strike
+        const boltHitbox = { x: bolt.x, y: HEIGHT - 50, width: 30, height: 60 };
+        if (aabb(player, boltHitbox)) {
+          triggerDamage(true);
+          bolt.life = 0.1; // Prevent double damage
+        }
+      }
+
+      if (bolt.life <= 0) lightningBolts.splice(i, 1);
+    }
+  }
 }
 
 // --- Draw ---
@@ -2572,15 +2646,30 @@ function drawBackground() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Draw clouds
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const c of clouds) {
-    ctx.globalAlpha = 0.6;
-    ctx.font = c.size + 'px sans-serif';
-    ctx.fillText('\u2601\uFE0F', c.x, c.y);
+  // Draw fluffy clouds (3 overlapping circles each)
+  for (const cloud of skyClouds) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`;
+    ctx.beginPath();
+    ctx.arc(cloud.x, cloud.y, cloud.w * 0.25, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.25, cloud.y - cloud.w * 0.12, cloud.w * 0.3, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.5, cloud.y, cloud.w * 0.22, 0, Math.PI * 2);
+    ctx.fill();
   }
-  ctx.globalAlpha = 1.0;
+
+  // Sun in top-right corner with rotating rays
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(WIDTH - 60, 50, 30, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + Date.now() / 3000;
+    ctx.beginPath();
+    ctx.moveTo(WIDTH - 60 + Math.cos(angle) * 35, 50 + Math.sin(angle) * 35);
+    ctx.lineTo(WIDTH - 60 + Math.cos(angle) * 48, 50 + Math.sin(angle) * 48);
+    ctx.stroke();
+  }
 }
 
 function drawGround() {
@@ -4148,6 +4237,45 @@ function drawPlayingScene() {
     }
 
     ctx.restore();
+  }
+
+  // Lightning warning (pulsing yellow glow on cloud)
+  if (lightningWarning) {
+    const pulse = Math.sin(Date.now() / 80) * 0.3 + 0.5;
+    ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
+    ctx.beginPath();
+    ctx.arc(lightningWarning.x, lightningWarning.y - 10, 25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Lightning bolts
+  for (const bolt of lightningBolts) {
+    // Screen flash
+    if (bolt.flash > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${bolt.flash * 0.3})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    }
+    // Draw jagged bolt
+    ctx.strokeStyle = `rgba(255, 255, 100, ${Math.max(0, bolt.life / 0.3)})`;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#ffff00';
+    ctx.shadowBlur = 15;
+    for (const seg of bolt.segments) {
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+    // Inner bright core
+    ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, bolt.life / 0.3)})`;
+    ctx.lineWidth = 2;
+    for (const seg of bolt.segments) {
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
   }
 
   // Particles
