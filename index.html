@@ -116,6 +116,15 @@
     -webkit-backdrop-filter: blur(4px);
   }
   #pauseBtn:hover { background: rgba(0,0,0,0.6); }
+  #nameInputOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 300;
+    background: rgba(0,0,0,0.5);
+  }
 </style>
 </head>
 <body>
@@ -133,6 +142,20 @@
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
   </div>
   <div class="touch-btn" id="btnRight" data-key="ArrowRight">&#9654;</div>
+</div>
+
+<div id="nameInputOverlay" style="display:none;">
+  <div style="background:rgba(0,0,0,0.85); padding:30px; border-radius:15px; text-align:center; border:2px solid rgba(255,215,0,0.5);">
+    <div style="font-size:48px; margin-bottom:10px;">&#x1F437;</div>
+    <div style="color:#FFD700; font-size:24px; font-weight:bold; margin-bottom:15px;">Kasica Prasica</div>
+    <div style="color:#fff; font-size:16px; margin-bottom:10px;">Kako se zove&#x0161;, igra&#x010D;u?</div>
+    <input type="text" id="playerNameInput" maxlength="15" placeholder="Tvoje ime..."
+      style="font-size:20px; padding:10px 15px; border-radius:8px; border:2px solid #FFD700; background:#1a1a2e; color:#fff; text-align:center; width:200px; outline:none;">
+    <br>
+    <button id="nameSubmitBtn" style="margin-top:15px; font-size:18px; padding:10px 30px; border-radius:8px; border:none; background:#FFD700; color:#000; font-weight:bold; cursor:pointer;">
+      Igraj! &#x1F3AE;
+    </button>
+  </div>
 </div>
 
 <script>
@@ -254,6 +277,53 @@ const game = {
   butcherSchedule: [],
   lastScore: 0 // track for HUD bounce
 };
+
+// --- Player Name & Bitcoin Currency ---
+let playerName = localStorage.getItem('kasicaPlayerName') || '';
+let playerBTC = 0;
+let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0');
+
+// --- Shop Power-ups ---
+let scoreMultiplier = 1;
+let hasShield = false;
+let turboFart = false;
+let megaPoop = false;
+let shopSkipRect = null;
+
+const SHOP_ITEMS = [
+  { id: 'extraLife', name: 'Extra \u017Divot', desc: 'Popravi jednu pukotinu', icon: '\u2764\uFE0F', cost: 5, effect: function() { game.cracks = Math.max(0, game.cracks - 1); } },
+  { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
+  { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
+  { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak, +2 prde\u017Ea', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; fartCharges = Math.min(MAX_FARTS, fartCharges + 2); } },
+  { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } }
+];
+
+function showNameInput() {
+  document.getElementById('nameInputOverlay').style.display = 'flex';
+  document.getElementById('playerNameInput').value = playerName;
+  document.getElementById('playerNameInput').focus();
+}
+
+function hideNameInput() {
+  document.getElementById('nameInputOverlay').style.display = 'none';
+}
+
+function saveToLeaderboard() {
+  const entry = {
+    name: playerName,
+    score: game.score,
+    level: game.level,
+    btc: playerBTC,
+    date: new Date().toISOString().split('T')[0]
+  };
+  let leaderboard = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+  leaderboard.push(entry);
+  leaderboard.sort(function(a, b) { return b.score - a.score; });
+  leaderboard = leaderboard.slice(0, 20);
+  localStorage.setItem('kasicaLeaderboard', JSON.stringify(leaderboard));
+  totalBTC += playerBTC;
+  localStorage.setItem('kasicaTotalBTC', totalBTC.toString());
+}
 
 // --- Intro Cutscene State ---
 let introScene = 0;
@@ -1870,6 +1940,10 @@ function startLevel() {
 
   // Reset fart state
   fartCharges = MAX_FARTS; // refill farts each level
+  // Reset per-level power-ups (shield persists)
+  scoreMultiplier = 1;
+  turboFart = false;
+  megaPoop = false;
   fartClouds.length = 0;
   chokingDevils.length = 0;
   fartCooldown = 0;
@@ -1929,6 +2003,8 @@ function startLevel() {
 // --- Input ---
 const keys = {};
 window.addEventListener('keydown', (e) => {
+  // Don't process game keys during name input or shop
+  if (game.screen === 'nameInput' || game.screen === 'shop') return;
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
     e.preventDefault();
   }
@@ -1974,11 +2050,12 @@ window.addEventListener('keydown', (e) => {
       fartCharges--;
       fartCooldown = 0.5; // half second cooldown
       // Spawn fart cloud at piggy's butt (behind/below the piggy)
+      const fartScale = turboFart ? 1.5 : 1.0;
       fartClouds.push({
         x: player.x,
         y: player.y + 15,  // starts at butt level
-        width: 50,
-        height: 40,
+        width: 50 * fartScale,
+        height: 40 * fartScale,
         vy: -250,           // flies upward fast
         life: 2.0,          // lasts 2 seconds
         opacity: 0.8,
@@ -2021,14 +2098,15 @@ window.addEventListener('keydown', (e) => {
       playOink();
       game.score = 0;
       game.level = 1;
+      playerBTC = 0;
+      scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
       startLevel();
     } else if (game.screen === 'gameOver') {
       game.score = 0;
       game.level = 1;
       game.screen = 'title';
     } else if (game.screen === 'levelComplete') {
-      game.level++;
-      startLevel();
+      game.screen = 'shop';
     } else if (game.screen === 'victory') {
       stopVictoryMusic();
       game.screen = 'title';
@@ -2038,6 +2116,7 @@ window.addEventListener('keydown', (e) => {
 
 // Click/touch on canvas also starts/restarts game (and unlocks audio!)
 canvas.addEventListener('click', () => {
+  if (game.screen === 'nameInput') return;
   const wasUnlocked = audioUnlocked;
   unlockAudio();
   if (game.screen === 'intro') {
@@ -2063,6 +2142,8 @@ canvas.addEventListener('click', () => {
     playOink();
     game.score = 0;
     game.level = 1;
+    playerBTC = 0;
+    scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
     resurrectionCount = 0;
     // Auto-fullscreen on mobile game start
     if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
@@ -2075,8 +2156,7 @@ canvas.addEventListener('click', () => {
     game.level = 1;
     game.screen = 'title';
   } else if (game.screen === 'levelComplete') {
-    game.level++;
-    startLevel();
+    game.screen = 'shop';
   } else if (game.screen === 'victory') {
     stopVictoryMusic();
     game.screen = 'title';
@@ -2131,9 +2211,10 @@ function simulateKeyDown(keyName) {
     if (fartCharges > 0 && fartCooldown <= 0) {
       fartCharges--;
       fartCooldown = 0.5;
+      var tfs = turboFart ? 1.5 : 1.0;
       fartClouds.push({
         x: player.x, y: player.y + 15,
-        width: 50, height: 40,
+        width: 50 * tfs, height: 40 * tfs,
         vy: -250, life: 2.0, opacity: 0.8, scale: 1.0, wobble: 0
       });
       playFartSound();
@@ -2208,6 +2289,13 @@ function aabb(a, b) {
 
 // --- Update ---
 function triggerDamage(fromBomb) {
+  if (hasShield) {
+    hasShield = false;
+    spawnParticles(player.x, player.y, '\uD83D\uDEE1\uFE0F', 4, 150);
+    spawnScorePopup(player.x, player.y - 30, '\uD83D\uDEE1\uFE0F Blocked!', '#4488ff');
+    triggerScreenShake(3, 0.15);
+    return;
+  }
   game.cracks++;
   game.score = Math.max(0, game.score - 5);
   flashTimer = 0.3;
@@ -2231,6 +2319,7 @@ function triggerDamage(fromBomb) {
     gameOverTimer = 0;
     stopMusic();
     playGameOver();
+    saveToLeaderboard();
     // Initialize laughing devils
     gameOverDevils = [];
     for (let i = 0; i < 4; i++) {
@@ -2263,6 +2352,9 @@ function triggerDamage(fromBomb) {
 }
 
 function update(dt) {
+  // nameInput and shop screens don't need updates
+  if (game.screen === 'nameInput' || game.screen === 'shop') return;
+
   // Always update clouds
   updateClouds(dt);
 
@@ -2500,11 +2592,18 @@ function update(dt) {
     stopMusic();
     if (game.level >= 10) {
       game.screen = 'victory';
+      if (game.cracks === 0) { playerBTC += 5; }
+      saveToLeaderboard();
       initVictoryScene();
     } else {
       game.screen = 'levelComplete';
       levelCompleteTimer = 0;
       playLevelComplete();
+      // Flawless level bonus
+      if (game.cracks === 0) {
+        playerBTC += 5;
+        spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Flawless!', '#F7931A');
+      }
       // Level complete confetti particles
       const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
       for (let i = 0; i < 18; i++) {
@@ -2591,11 +2690,12 @@ function update(dt) {
     if (poopAnimTimer <= 0) {
       isPooping = false;
       poopCooldown = POOP_COOLDOWN;
+      var poopScale = megaPoop ? 1.5 : 1.0;
       poops.push({
         x: player.x,
         y: HEIGHT - 35,
-        width: 30,
-        height: 25,
+        width: 30 * poopScale,
+        height: 25 * poopScale,
         life: POOP_DURATION,
         stinkTimer: 0
       });
@@ -2646,6 +2746,8 @@ function update(dt) {
           spawnParticles(obj.x, obj.y, '\u{1F922}', 3, 100);
           spawnParticles(obj.x, obj.y, '\u{1F480}', 2, 80);
           spawnScorePopup(obj.x, obj.y, '\u2620\uFE0F', '#44ff44');
+          playerBTC += 1;
+          spawnScorePopup(obj.x, obj.y - 20, '+1 \u20BF', '#F7931A');
           break; // one devil per cloud
         }
       }
@@ -2906,7 +3008,7 @@ function update(dt) {
         continue;
       } else {
         // Coin collected
-        game.score += obj.value;
+        game.score += obj.value * scoreMultiplier;
         scoreBounceFactor = 1.0;
 
         // Particles + sound based on value
@@ -3090,6 +3192,8 @@ function update(dt) {
         spawnParticles(enemy.x, enemy.y, '\u{1F922}', 4, 100);
         spawnParticles(enemy.x, enemy.y, '\u{1F4A9}', 2, 60);
         spawnScorePopup(enemy.x, enemy.y, '\u{1F480}\u{1F4A9}', '#885500');
+        playerBTC += 3;
+        spawnScorePopup(enemy.x, enemy.y - 20, '+3 \u20BF', '#F7931A');
       }
     }
   }
@@ -3624,9 +3728,165 @@ function drawHUD() {
     ctx.textBaseline = 'middle';
     ctx.fillText('\u{1F4A9} OK', WIDTH - 50, 101);
   }
+
+  // BTC display (below fart meter)
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillText('\u20BF ' + playerBTC, 16, 76);
+  ctx.fillStyle = '#F7931A';
+  ctx.fillText('\u20BF ' + playerBTC, 15, 75);
+
+  // Player name (top-right, below crack indicators)
+  if (playerName) {
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillText(playerName, WIDTH - 16, 46);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(playerName, WIDTH - 15, 45);
+  }
+
+  // Active shield indicator
+  if (hasShield) {
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('\uD83D\uDEE1\uFE0F', 155, 73);
+  }
 }
 
+function drawShop() {
+  // Dark background
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Title
+  ctx.font = 'bold 36px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('\uD83C\uDFEA BANKA & SHOP', WIDTH / 2, 45);
+
+  // BTC balance
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillStyle = '#F7931A';
+  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin', WIDTH / 2, 80);
+
+  // Item cards
+  var cardW = 140;
+  var cardH = 160;
+  var startX = (WIDTH - SHOP_ITEMS.length * (cardW + 10)) / 2;
+
+  for (var i = 0; i < SHOP_ITEMS.length; i++) {
+    var item = SHOP_ITEMS[i];
+    var x = startX + i * (cardW + 10);
+    var y = 110;
+    var canBuy = playerBTC >= item.cost;
+
+    // Card background
+    ctx.fillStyle = canBuy ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)';
+    ctx.fillRect(x, y, cardW, cardH);
+    ctx.strokeStyle = canBuy ? '#FFD700' : '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, cardW, cardH);
+
+    // Icon
+    ctx.font = '36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(item.icon, x + cardW / 2, y + 40);
+
+    // Name
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = canBuy ? '#fff' : '#555';
+    ctx.fillText(item.name, x + cardW / 2, y + 65);
+
+    // Description
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = canBuy ? '#aaa' : '#444';
+    ctx.fillText(item.desc, x + cardW / 2, y + 82);
+
+    // Price
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = canBuy ? '#F7931A' : '#553300';
+    ctx.fillText('\u20BF ' + item.cost, x + cardW / 2, y + 110);
+
+    // Buy button
+    if (canBuy) {
+      ctx.fillStyle = '#F7931A';
+      ctx.fillRect(x + 20, y + 125, cardW - 40, 28);
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('KUPI', x + cardW / 2, y + 143);
+    }
+
+    // Store rect for click detection
+    item._rect = { x: x + 20, y: y + 125, w: cardW - 40, h: 28 };
+  }
+
+  // Skip button
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = '#4CAF50';
+  var skipY = HEIGHT - 60;
+  ctx.fillText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY);
+  shopSkipRect = { x: WIDTH / 2 - 150, y: skipY - 20, w: 300, h: 35 };
+
+  // Active power-ups display
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#aaa';
+  ctx.textAlign = 'center';
+  var activeText = 'Aktivno: ';
+  if (scoreMultiplier > 1) activeText += '2x Score ';
+  if (hasShield) activeText += '\uD83D\uDEE1\uFE0F ';
+  if (turboFart) activeText += '\uD83D\uDCA8\uD83D\uDCA8 ';
+  if (megaPoop) activeText += '\uD83D\uDCA9\uD83D\uDCA9 ';
+  if (activeText === 'Aktivno: ') activeText += 'ni\u0161ta';
+  ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
+}
+
+function handleShopClick(e) {
+  var rect = canvas.getBoundingClientRect();
+  var clickX = (e.clientX - rect.left) * (WIDTH / rect.width);
+  var clickY = (e.clientY - rect.top) * (HEIGHT / rect.height);
+
+  // Check item buy buttons
+  for (var si = 0; si < SHOP_ITEMS.length; si++) {
+    var item = SHOP_ITEMS[si];
+    if (item._rect && playerBTC >= item.cost) {
+      var r = item._rect;
+      if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
+        playerBTC -= item.cost;
+        item.effect();
+        return;
+      }
+    }
+  }
+
+  // Check skip button
+  if (shopSkipRect) {
+    var sr = shopSkipRect;
+    if (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h) {
+      game.level++;
+      startLevel();
+    }
+  }
+}
+
+canvas.addEventListener('click', function(e) {
+  if (game.screen === 'shop') {
+    handleShopClick(e);
+  }
+});
+
 function draw() {
+  if (game.screen === 'nameInput') {
+    // nameInput uses HTML overlay, just draw dark background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    return;
+  }
   if (game.screen === 'intro') {
     drawIntro();
     return;
@@ -3644,6 +3904,8 @@ function draw() {
     drawGameOver();
   } else if (game.screen === 'victory') {
     drawVictory();
+  } else if (game.screen === 'shop') {
+    drawShop();
   }
 
   // Pause overlay (drawn on top of everything)
@@ -4634,13 +4896,37 @@ function drawTitle() {
   ctx.lineWidth = 1;
   ctx.fillText('Hvataj nov\u010di\u0107e! Izbegavaj bombe!', WIDTH / 2, HEIGHT / 2 + 10);
 
+  // Player greeting
+  if (playerName) {
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Igra\u010D: ' + playerName, WIDTH / 2, HEIGHT / 2 + 40);
+  }
+
   // Start prompt (pulsing)
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 26px sans-serif';
   ctx.fillStyle = '#333';
-  ctx.fillText('Klikni ili pritisni SPACE', WIDTH / 2, HEIGHT / 2 + 60);
+  ctx.fillText('Klikni ili pritisni SPACE', WIDTH / 2, HEIGHT / 2 + 70);
   ctx.globalAlpha = 1.0;
+
+  // Leaderboard
+  var lb = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+  if (lb.length > 0) {
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'center';
+    ctx.fillText('\uD83C\uDFC6 TOP IGRA\u010CI', WIDTH / 2, HEIGHT - 170);
+
+    ctx.font = '14px sans-serif';
+    for (var li = 0; li < Math.min(5, lb.length); li++) {
+      var entry = lb[li];
+      var medal = li === 0 ? '\uD83E\uDD47' : li === 1 ? '\uD83E\uDD48' : li === 2 ? '\uD83E\uDD49' : '  ';
+      ctx.fillStyle = li === 0 ? '#FFD700' : li === 1 ? '#C0C0C0' : li === 2 ? '#CD7F32' : '#aaa';
+      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')', WIDTH / 2, HEIGHT - 145 + li * 22);
+    }
+  }
 }
 
 function drawPlayingScene() {
@@ -5527,14 +5813,14 @@ function drawLevelComplete() {
   // Score
   ctx.font = '28px sans-serif';
   ctx.fillStyle = '#444';
-  ctx.fillText('\u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 80);
+  ctx.fillText('\u{1FA99} Score: ' + game.score + '   \u20BF ' + playerBTC, WIDTH / 2, HEIGHT - 80);
 
-  // Next level prompt
+  // Next level prompt - now goes to shop
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 22px sans-serif';
   ctx.fillStyle = '#333';
-  ctx.fillText('Klikni za Level ' + (game.level + 1), WIDTH / 2, HEIGHT - 40);
+  ctx.fillText('Klikni za Shop \uD83C\uDFEA', WIDTH / 2, HEIGHT - 40);
   ctx.globalAlpha = 1.0;
 }
 
@@ -5746,7 +6032,12 @@ function drawGameOver() {
   // Score info
   ctx.font = '26px sans-serif';
   ctx.fillStyle = '#dda050';
-  ctx.fillText('Level: ' + game.level + '   \u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 50);
+  ctx.fillText('Level: ' + game.level + '   \u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 55);
+
+  // BTC earned
+  ctx.font = '20px sans-serif';
+  ctx.fillStyle = '#F7931A';
+  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin zaradjeno', WIDTH / 2, HEIGHT - 30);
 
   // --- Laughing devils around the spit ---
   for (const d of gameOverDevils) {
@@ -5834,6 +6125,32 @@ function drawGameOver() {
     ctx.fillText('Klikni za novu igru', WIDTH / 2, HEIGHT - 20);
     ctx.globalAlpha = 1.0;
   }
+}
+
+// --- Name Input Handlers ---
+document.getElementById('nameSubmitBtn').addEventListener('click', function() {
+  const name = document.getElementById('playerNameInput').value.trim();
+  if (name.length > 0) {
+    playerName = name;
+    localStorage.setItem('kasicaPlayerName', playerName);
+    hideNameInput();
+    game.screen = 'intro';
+  }
+});
+
+document.getElementById('playerNameInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    document.getElementById('nameSubmitBtn').click();
+  }
+  e.stopPropagation();
+});
+
+// --- Initialize Game Screen ---
+if (!playerName) {
+  game.screen = 'nameInput';
+  showNameInput();
+} else {
+  game.screen = 'intro';
 }
 
 // --- Game Loop ---
