@@ -1385,6 +1385,129 @@ function playChokingSound() {
   } catch(e) {}
 }
 
+// --- Thunder / Lightning Sounds ---
+function playThunderRumble() {
+  // Low rumbling sound - distant thunder
+  try {
+    const actx = getAudioContext();
+    const now = actx.currentTime;
+    // Brown noise burst for rumble
+    const bufferSize = actx.sampleRate * 2;
+    const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let lastOut = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      lastOut = (lastOut + (0.02 * white)) / 1.02;
+      data[i] = lastOut * 3.5;
+    }
+    const noise = actx.createBufferSource();
+    noise.buffer = buffer;
+    // Low-pass filter for deep rumble
+    const filter = actx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(80, now);
+    filter.frequency.exponentialRampToValueAtTime(40, now + 2);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.4, now + 0.3);
+    gain.gain.linearRampToValueAtTime(0.2, now + 1.0);
+    gain.gain.linearRampToValueAtTime(0, now + 2.0);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(actx.destination);
+    noise.start(now);
+    noise.stop(now + 2.0);
+  } catch(e) {}
+}
+
+function playThunderCrack() {
+  // Sharper crack - closer thunder, danger imminent
+  try {
+    const actx = getAudioContext();
+    const now = actx.currentTime;
+    // White noise burst
+    const bufferSize = actx.sampleRate * 0.8;
+    const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+    }
+    const noise = actx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = actx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(200, now);
+    filter.Q.value = 0.5;
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(actx.destination);
+    noise.start(now);
+    noise.stop(now + 0.8);
+  } catch(e) {}
+}
+
+function playThunderStrike() {
+  // Full lightning strike - loud crack + rumble tail
+  try {
+    const actx = getAudioContext();
+    const now = actx.currentTime;
+    // Initial CRACK - sharp white noise
+    const crackSize = actx.sampleRate * 0.15;
+    const crackBuf = actx.createBuffer(1, crackSize, actx.sampleRate);
+    const crackData = crackBuf.getChannelData(0);
+    for (let i = 0; i < crackSize; i++) {
+      crackData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (crackSize * 0.1));
+    }
+    const crack = actx.createBufferSource();
+    crack.buffer = crackBuf;
+    const crackGain = actx.createGain();
+    crackGain.gain.setValueAtTime(0.7, now);
+    crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    crack.connect(crackGain);
+    crackGain.connect(actx.destination);
+    crack.start(now);
+    crack.stop(now + 0.15);
+    // Rumble tail
+    const tailSize = actx.sampleRate * 1.5;
+    const tailBuf = actx.createBuffer(1, tailSize, actx.sampleRate);
+    const tailData = tailBuf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < tailSize; i++) {
+      last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+      tailData[i] = last * 3;
+    }
+    const tail = actx.createBufferSource();
+    tail.buffer = tailBuf;
+    const tailFilter = actx.createBiquadFilter();
+    tailFilter.type = 'lowpass';
+    tailFilter.frequency.value = 100;
+    const tailGain = actx.createGain();
+    tailGain.gain.setValueAtTime(0.3, now + 0.1);
+    tailGain.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
+    tail.connect(tailFilter);
+    tailFilter.connect(tailGain);
+    tailGain.connect(actx.destination);
+    tail.start(now + 0.1);
+    tail.stop(now + 1.5);
+    // Electric zap overtone
+    const zap = actx.createOscillator();
+    zap.type = 'sawtooth';
+    zap.frequency.setValueAtTime(800, now);
+    zap.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+    const zapGain = actx.createGain();
+    zapGain.gain.setValueAtTime(0.15, now);
+    zapGain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    zap.connect(zapGain);
+    zapGain.connect(actx.destination);
+    zap.start(now);
+    zap.stop(now + 0.3);
+  } catch(e) {}
+}
+
 function playPoopSound() {
   try {
     const ctx = getAudioContext();
@@ -3099,31 +3222,66 @@ function update(dt) {
     }
   }
 
-  // --- Lightning System (Level 4+) ---
+  // --- Lightning System (Level 4+) - 3 PHASES ---
+  // Phase 1: Cloud darkens + rumble sound (2.5s warning)
+  // Phase 2: Bright flash + ⚡ danger zone indicator (1.0s)
+  // Phase 3: STRIKE! Vertical bolt from cloud to ground
   if (game.level >= 4) {
     lightningSpawnTimer -= dt;
     if (lightningSpawnTimer <= 0 && !lightningWarning) {
-      lightningSpawnTimer = 5 + Math.random() * 3;
+      lightningSpawnTimer = 7 + Math.random() * 4;
       const cloud = skyClouds[Math.floor(Math.random() * skyClouds.length)];
-      lightningWarning = { x: cloud.x + cloud.w * 0.25, y: cloud.y + 20, timer: 1.5 };
+      lightningWarning = {
+        x: cloud.x + cloud.w * 0.25,
+        y: cloud.y + 20,
+        cloudIdx: skyClouds.indexOf(cloud),
+        phase: 1,        // 1=rumble, 2=flash, 3=strike
+        timer: 2.5,      // Phase 1 lasts 2.5s
+        totalTimer: 0,
+        thunderPlayed: false,
+        flashPlayed: false
+      };
     }
 
     if (lightningWarning) {
-      lightningWarning.timer -= dt;
-      if (lightningWarning.timer <= 0) {
-        lightningBolts.push({
-          x: lightningWarning.x,
-          y: lightningWarning.y,
-          bottomY: lightningWarning.y,
-          width: 20,
-          height: 30,
-          speed: 560,
-          segments: generateLightningSegments(lightningWarning.x, lightningWarning.y, HEIGHT - 30),
-          life: 0.3,
-          flash: 1.0
-        });
-        lightningWarning = null;
-        triggerScreenShake(5, 0.2);
+      const lw = lightningWarning;
+      lw.timer -= dt;
+      lw.totalTimer += dt;
+
+      // Phase 1: Rumble - cloud darkens, low thunder sound
+      if (lw.phase === 1) {
+        if (!lw.thunderPlayed) {
+          lw.thunderPlayed = true;
+          playThunderRumble();
+        }
+        if (lw.timer <= 0) {
+          lw.phase = 2;
+          lw.timer = 1.2;  // Phase 2 lasts 1.2s - flash warning
+        }
+      }
+      // Phase 2: Flash warning - bright pulsing zone, danger indicator
+      else if (lw.phase === 2) {
+        if (!lw.flashPlayed) {
+          lw.flashPlayed = true;
+          playThunderCrack();
+        }
+        if (lw.timer <= 0) {
+          // Phase 3: STRIKE!
+          lightningBolts.push({
+            x: lw.x,
+            y: lw.y,
+            bottomY: lw.y,
+            width: 20,
+            height: 30,
+            speed: 560,
+            segments: generateLightningSegments(lw.x, lw.y, HEIGHT - 30),
+            life: 0.4,
+            flash: 1.0
+          });
+          lightningWarning = null;
+          triggerScreenShake(8, 0.3);
+          playThunderStrike();
+        }
       }
     }
 
@@ -3131,14 +3289,14 @@ function update(dt) {
     for (let i = lightningBolts.length - 1; i >= 0; i--) {
       const bolt = lightningBolts[i];
       bolt.life -= dt;
-      bolt.flash -= dt * 3;
+      bolt.flash -= dt * 2.5;
 
-      // Collision with player (check if any segment is near player)
-      if (bolt.life > 0.15) { // Only damage on initial strike
+      // Collision with player
+      if (bolt.life > 0.2) {
         const boltHitbox = { x: bolt.x, y: HEIGHT - 50, width: 30, height: 60 };
         if (aabb(player, boltHitbox)) {
           triggerDamage(true);
-          bolt.life = 0.1; // Prevent double damage
+          bolt.life = 0.1;
         }
       }
 
@@ -5691,13 +5849,60 @@ function drawPlayingScene() {
     }
   }
 
-  // Lightning warning (pulsing yellow glow on cloud) - draw behind ground elements
+  // Lightning warning - 3-phase visual
   if (lightningWarning) {
-    const pulse = Math.sin(Date.now() / 80) * 0.3 + 0.5;
-    ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
-    ctx.beginPath();
-    ctx.arc(lightningWarning.x, lightningWarning.y - 10, 25, 0, Math.PI * 2);
-    ctx.fill();
+    const lw = lightningWarning;
+
+    if (lw.phase === 1) {
+      // Phase 1: Cloud darkens, subtle flickers
+      const flicker = Math.random() > 0.92 ? 0.4 : 0.15;
+      ctx.fillStyle = `rgba(80, 80, 120, ${flicker})`;
+      ctx.beginPath();
+      ctx.ellipse(lw.x, lw.y - 15, 50, 25, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Small "rumble" text
+      const rumbleAlpha = Math.sin(lw.totalTimer * 6) * 0.3 + 0.4;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(200, 200, 255, ${rumbleAlpha})`;
+      ctx.fillText('⛈️', lw.x, lw.y - 35);
+    }
+    else if (lw.phase === 2) {
+      // Phase 2: DANGER! Bright pulsing column showing where bolt will strike
+      const pulse = Math.sin(Date.now() / 60) * 0.4 + 0.6;
+
+      // Pulsing danger column from cloud to ground
+      ctx.save();
+      const gradient = ctx.createLinearGradient(lw.x, lw.y, lw.x, HEIGHT - 30);
+      gradient.addColorStop(0, `rgba(255, 255, 0, ${pulse * 0.4})`);
+      gradient.addColorStop(0.5, `rgba(255, 200, 0, ${pulse * 0.2})`);
+      gradient.addColorStop(1, `rgba(255, 100, 0, ${pulse * 0.3})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(lw.x - 18, lw.y, 36, HEIGHT - 30 - lw.y);
+      ctx.restore();
+
+      // Flashing ⚡ icon at cloud
+      ctx.font = `bold ${24 + pulse * 8}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(255, 255, 0, ${pulse})`;
+      ctx.fillText('⚡', lw.x, lw.y - 10);
+
+      // Danger zone on ground
+      ctx.fillStyle = `rgba(255, 50, 0, ${pulse * 0.5})`;
+      ctx.beginPath();
+      ctx.ellipse(lw.x, HEIGHT - 30, 35, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // "OPASNOST!" text
+      if (Math.sin(Date.now() / 100) > 0) {
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillStyle = `rgba(255, 255, 0, ${pulse})`;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.lineWidth = 3;
+        ctx.strokeText('⚠️ MUNJA!', lw.x, HEIGHT - 50);
+        ctx.fillText('⚠️ MUNJA!', lw.x, HEIGHT - 50);
+      }
+    }
   }
 
   // Draw poops with stink waves (behind enemies)
