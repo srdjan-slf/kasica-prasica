@@ -126,6 +126,7 @@ const game = {
   levelConfig: null,
   devilsSpawned: 0,
   devilSchedule: [],
+  butcherSchedule: [],
   lastScore: 0 // track for HUD bounce
 };
 
@@ -1142,6 +1143,96 @@ function spawnDevil() {
   });
 }
 
+function spawnButcher() {
+  const cfg = game.levelConfig;
+  const baseSpeed = cfg ? cfg.fallSpeed * 0.95 : 150;
+
+  // Butcher is tough - slower but requires more shakes
+  const speed = baseSpeed * 0.75;
+  const shakeRequired = 10;
+  const hammerTimeout = 6; // 6 seconds to shake off
+  const size = 50; // bigger than devils
+
+  const zigzagSpeed = 60 + Math.random() * 80;
+  const zigzagFreq = 1.0 + Math.random() * 2;
+  const zigzagPhase = Math.random() * Math.PI * 2;
+
+  objects.push({
+    type: 'butcher',
+    emoji: '\u{1F9D1}\u200D\u{1F373}',
+    x: Math.random() * (WIDTH - size) + size / 2,
+    y: -size,
+    width: size, height: size, speed,
+    latched: false, hammerTimer: 0, shakeProgress: 0,
+    shakeRequired, hammerTimeout, hammerAnimTimer: 0,
+    stealTimer: 0,
+    zigzagSpeed, zigzagFreq, zigzagPhase,
+    zigzagTime: 0
+  });
+}
+
+function playButcherLatch() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+    // Metallic knife sharpening sound
+    const noise = ctx.createBufferSource();
+    const bufSize = ctx.sampleRate * 0.4;
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.sin(i / bufSize * Math.PI);
+    }
+    noise.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(3000, t);
+    bp.frequency.linearRampToValueAtTime(1500, t + 0.3);
+    bp.Q.value = 8;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.4);
+    noise.connect(bp);
+    bp.connect(gain);
+    gain.connect(ctx.destination);
+    noise.start(t);
+    noise.stop(t + 0.4);
+
+    // Low menacing tone
+    const osc = ctx.createOscillator();
+    const oGain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.linearRampToValueAtTime(80, t + 0.5);
+    oGain.gain.setValueAtTime(0.15, t);
+    oGain.gain.linearRampToValueAtTime(0, t + 0.5);
+    osc.connect(oGain);
+    oGain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.5);
+  } catch(e) {}
+}
+
+function playKnifeSound() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+    // Quick metallic "shink"
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(2000, t);
+    osc.frequency.linearRampToValueAtTime(4000, t + 0.03);
+    osc.frequency.linearRampToValueAtTime(1000, t + 0.08);
+    gain.gain.setValueAtTime(0.08, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.08);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.08);
+  } catch(e) {}
+}
+
 // --- Level Management ---
 function startLevel() {
   const cfg = getLevelConfig(game.level);
@@ -1164,6 +1255,22 @@ function startLevel() {
       game.devilSchedule.push(Math.max(1, spawnAt));
     }
     game.devilSchedule.sort((a, b) => b - a); // sort descending (highest time first)
+  }
+
+  // Calculate butcher spawn schedule - butchers appear from level 2+
+  game.butcherSchedule = [];
+  if (game.level >= 2) {
+    const butcherCount = Math.max(0, Math.floor(game.level / 2)); // 1 at level 2-3, 2 at level 4-5, etc.
+    if (butcherCount > 0) {
+      const availableTime = cfg.duration - 8;
+      const interval = availableTime / (butcherCount + 1);
+      for (let i = 1; i <= butcherCount; i++) {
+        const jitter = (Math.random() - 0.5) * interval * 0.3;
+        const spawnAt = cfg.duration - (8 + interval * i) + jitter;
+        game.butcherSchedule.push(Math.max(2, spawnAt));
+      }
+      game.butcherSchedule.sort((a, b) => b - a);
+    }
   }
 
   // Reset fart state
@@ -1452,6 +1559,15 @@ function update(dt) {
     }
   }
 
+  // Butcher spawn from schedule
+  if (game.butcherSchedule && game.butcherSchedule.length > 0) {
+    const nextButcherTime = game.butcherSchedule[0];
+    if (game.levelTimer <= nextButcherTime) {
+      game.butcherSchedule.shift();
+      spawnButcher();
+    }
+  }
+
   // Update fart cooldown
   if (fartCooldown > 0) fartCooldown -= dt;
 
@@ -1473,7 +1589,7 @@ function update(dt) {
     // Check collision with falling devils
     for (let j = objects.length - 1; j >= 0; j--) {
       const obj = objects[j];
-      if (obj.type === 'devil' && !obj.latched && !obj.flyAway) {
+      if ((obj.type === 'devil' || obj.type === 'butcher') && !obj.latched && !obj.flyAway) {
         // Wide hitbox for the cloud
         const cloudW = cloud.width * cloud.scale;
         const cloudH = cloud.height * cloud.scale;
@@ -1522,17 +1638,29 @@ function update(dt) {
     devil.hammerAnimTimer += dt;
     shakeHintTimer += dt;
 
-    // Continuous screen shake while devil is latched (subtle; heavy shakes harder)
+    // Continuous screen shake while devil is latched (subtle; heavy/butcher shakes harder)
     if (screenShake.duration <= 0) {
-      const shakeIntensity = devil.devilType === 'heavy' ? 5 : 3;
+      const shakeIntensity = (devil.devilType === 'heavy' || devil.devilType === 'butcher') ? 4 : 3;
       triggerScreenShake(shakeIntensity, 0.1);
     }
 
-    // Squeal timer
+    // Squeal timer - butcher alternates squeal and knife sound faster
     squealTimer += dt;
-    if (squealTimer >= 0.5) {
-      squealTimer -= 0.5;
-      playSqueal();
+    if (devil.devilType === 'butcher') {
+      if (squealTimer >= 0.4) {
+        squealTimer -= 0.4;
+        // Alternate between squeal and knife sound
+        if (Math.floor(devil.hammerAnimTimer / 0.4) % 2 === 0) {
+          playSqueal();
+        } else {
+          playKnifeSound();
+        }
+      }
+    } else {
+      if (squealTimer >= 0.5) {
+        squealTimer -= 0.5;
+        playSqueal();
+      }
     }
 
     // Thief devil steals coins every 0.5s
@@ -1599,7 +1727,7 @@ function update(dt) {
     if (devil.hammerTimer >= devil.hammerTimeout) {
       triggerDamage(false);
       objects.push({
-        type: 'devil',
+        type: devil.devilType === 'butcher' ? 'butcher' : 'devil',
         devilType: devil.devilType,
         emoji: devil.emoji,
         x: devil.x,
@@ -1648,7 +1776,7 @@ function update(dt) {
     obj.y += obj.speed * dt;
 
     // Zigzag movement for devils
-    if (obj.type === 'devil' && !obj.latched && !obj.flyAway && obj.zigzagSpeed) {
+    if ((obj.type === 'devil' || obj.type === 'butcher') && !obj.latched && !obj.flyAway && obj.zigzagSpeed) {
       obj.zigzagTime += dt;
       // Unpredictable swerving using combined sine waves
       const swerve = Math.sin(obj.zigzagTime * obj.zigzagFreq + obj.zigzagPhase)
@@ -1706,6 +1834,31 @@ function update(dt) {
           } else if (dt === 'thief') {
             devilTypeIndicator = { text: '\u{1F911} LOPOV!', color: '#cc44ff', timer: 1.5 };
           }
+        }
+        objects.splice(i, 1);
+        continue;
+      } else if (obj.type === 'butcher') {
+        if (!game.latchedDevil) {
+          obj.latched = true;
+          game.latchedDevil = {
+            emoji: obj.emoji,
+            devilType: 'butcher',
+            x: player.x,
+            y: player.y - 50,
+            width: obj.width,
+            height: obj.height,
+            hammerTimer: 0,
+            shakeProgress: 0,
+            shakeRequired: obj.shakeRequired || 10,
+            hammerTimeout: obj.hammerTimeout || 6,
+            hammerAnimTimer: 0,
+            stealTimer: 0
+          };
+          lastShakeKey = null;
+          squealTimer = 0;
+          shakeHintTimer = 0;
+          playButcherLatch();
+          devilTypeIndicator = { text: '\u{1F52A} KASAPIN!', color: '#cc0000', timer: 2.0 };
         }
         objects.splice(i, 1);
         continue;
@@ -2135,6 +2288,18 @@ function drawPlayingScene() {
       ctx.shadowBlur = cornGlow;
       ctx.fillText(obj.emoji, obj.x, obj.y);
       ctx.shadowBlur = 0;
+    } else if (obj.type === 'butcher') {
+      ctx.font = (obj.width || 50) + 'px sans-serif';
+      // Menacing red glow
+      const glowPulse = 8 + 4 * Math.sin(now * 4);
+      ctx.shadowColor = '#cc0000';
+      ctx.shadowBlur = glowPulse;
+      ctx.fillText(obj.emoji, obj.x, obj.y);
+      // Draw knives on sides
+      ctx.font = '18px sans-serif';
+      ctx.fillText('\u{1F52A}', obj.x - 22, obj.y - 10);
+      ctx.fillText('\u{1F52A}', obj.x + 22, obj.y - 10);
+      ctx.shadowBlur = 0;
     } else if (obj.type === 'devil') {
       const dSize = obj.width || 38;
       ctx.font = dSize + 'px sans-serif';
@@ -2157,31 +2322,46 @@ function drawPlayingScene() {
     ctx.textBaseline = 'middle';
 
     // Visual flair per type
-    if (devil.devilType === 'fast') {
-      // Speed lines behind fast devil
-      ctx.globalAlpha = 0.3;
-      ctx.font = '14px sans-serif';
-      for (let sl = 0; sl < 3; sl++) {
-        ctx.fillText('\u2014', devil.x - 22 - sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
-        ctx.fillText('\u2014', devil.x + 22 + sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
+    if (devil.devilType === 'butcher') {
+      // Butcher-specific drawing
+      ctx.font = '46px sans-serif';
+      ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
+
+      // Two knives - alternating stabbing animation
+      const knifePhase = devil.hammerAnimTimer * 4;
+      const leftKnifeY = Math.sin(knifePhase) * 12;
+      const rightKnifeY = Math.sin(knifePhase + Math.PI) * 12; // opposite phase
+
+      ctx.font = '22px sans-serif';
+      ctx.fillText('\u{1F52A}', devil.x - 28, devil.y - 10 + leftKnifeY + shakeVisualOffset);
+      ctx.fillText('\u{1F52A}', devil.x + 28, devil.y - 10 + rightKnifeY + shakeVisualOffset);
+    } else {
+      if (devil.devilType === 'fast') {
+        // Speed lines behind fast devil
+        ctx.globalAlpha = 0.3;
+        ctx.font = '14px sans-serif';
+        for (let sl = 0; sl < 3; sl++) {
+          ctx.fillText('\u2014', devil.x - 22 - sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
+          ctx.fillText('\u2014', devil.x + 22 + sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
+        }
+        ctx.globalAlpha = 1.0;
+        ctx.font = devilFontSize + 'px sans-serif';
       }
-      ctx.globalAlpha = 1.0;
-      ctx.font = devilFontSize + 'px sans-serif';
+
+      ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
+
+      // Thief: show coin being stolen periodically
+      if (devil.devilType === 'thief' && devil.stealTimer < 0.25) {
+        ctx.font = '16px sans-serif';
+        ctx.fillText('\u{1F4B0}', devil.x + 20, devil.y - 10 + shakeVisualOffset);
+      }
+
+      // Hammer animation (heavy has slower swing)
+      const hammerRate = devil.devilType === 'heavy' ? 0.5 : 0.3;
+      const hammerSide = Math.floor(devil.hammerAnimTimer / hammerRate) % 2 === 0 ? -1 : 1;
+      ctx.font = '24px sans-serif';
+      ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
     }
-
-    ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
-
-    // Thief: show coin being stolen periodically
-    if (devil.devilType === 'thief' && devil.stealTimer < 0.25) {
-      ctx.font = '16px sans-serif';
-      ctx.fillText('\u{1F4B0}', devil.x + 20, devil.y - 10 + shakeVisualOffset);
-    }
-
-    // Hammer animation (heavy has slower swing)
-    const hammerRate = devil.devilType === 'heavy' ? 0.5 : 0.3;
-    const hammerSide = Math.floor(devil.hammerAnimTimer / hammerRate) % 2 === 0 ? -1 : 1;
-    ctx.font = '24px sans-serif';
-    ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
 
     // Danger bar (red) - uses dynamic hammerTimeout
     const barWidth = 60;
