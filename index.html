@@ -3308,13 +3308,15 @@ function update(dt) {
   if (game.level >= 3) {
     groundEnemySpawnTimer -= dt;
     if (groundEnemySpawnTimer <= 0) {
-      groundEnemySpawnTimer = Math.max(3.0, (5.5 - game.level * 0.3) * 1.33);
+      groundEnemySpawnTimer = Math.max(4.2, (7.7 - game.level * 0.3) * 1.33);
       const available = Object.entries(GROUND_ENEMY_TYPES)
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
-      // Wolves spawn half as often — skip and retry soon
+      // Wolves spawn half as often, farmers/carnivores 40% less often
       if (key === 'wolf' && Math.random() < 0.7) {
         groundEnemySpawnTimer = 0.5;
+      } else if ((key === 'farmer' || key === 'carnivore') && Math.random() < 0.4) {
+        groundEnemySpawnTimer = 0.8;
       } else {
         const fromLeft = Math.random() > 0.5;
         groundEnemies.push({
