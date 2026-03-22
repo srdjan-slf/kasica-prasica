@@ -83,10 +83,45 @@
     background: rgba(136, 102, 0, 0.5);
     border-color: rgba(136, 102, 0, 0.9);
   }
+  #fullscreenBtn {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    color: white;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 8px;
+    font-size: 20px;
+    padding: 6px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #fullscreenBtn:hover { background: rgba(0,0,0,0.6); }
+  #pauseBtn {
+    display: none;
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    color: white;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 8px;
+    font-size: 20px;
+    padding: 6px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #pauseBtn:hover { background: rgba(0,0,0,0.6); }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
+<button id="fullscreenBtn" onclick="toggleFullscreen()">&#x26F6;</button>
+<button id="pauseBtn" onclick="if(game.screen==='playing'){isPaused=!isPaused;}">&#x23F8;</button>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
@@ -117,6 +152,18 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 100); });
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) elem.requestFullscreen();
+    else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+  } else {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+}
 
 // --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
@@ -220,6 +267,23 @@ let levelCompleteTimer = 0;
 
 // --- Game Over Animation Timer ---
 let gameOverTimer = 0;
+let gameOverDevils = [];
+let resurrectionState = 'none';
+let resurrectionTimer = 0;
+let angelY = -50;
+let resurrectionCount = 0;
+let resurrectionCost = 0;
+
+// --- Pause State ---
+let isPaused = false;
+
+// --- Victory Screen State ---
+let victoryTimer = 0;
+let victoryPiglets = [];
+let victoryAngels = [];
+let victoryVegans = [];
+let victoryIntruderTimer = 0;
+let victoryMusicTimeout = null;
 
 // --- Intro Music ---
 let introMusicNodes = [];
@@ -1857,6 +1921,7 @@ function startLevel() {
   player.facing = 0;
   player.facingSmooth = 0;
 
+  isPaused = false;
   game.screen = 'playing';
   startMusic();
 }
@@ -1867,6 +1932,17 @@ window.addEventListener('keydown', (e) => {
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
     e.preventDefault();
   }
+
+  // Pause toggle
+  if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && game.screen === 'playing') {
+    isPaused = !isPaused;
+    e.preventDefault();
+    return;
+  }
+
+  // Don't process gameplay keys while paused
+  if (isPaused) return;
+
   keys[e.key] = true;
 
   // Jump (only when grounded and no latched devil)
@@ -1953,6 +2029,9 @@ window.addEventListener('keydown', (e) => {
     } else if (game.screen === 'levelComplete') {
       game.level++;
       startLevel();
+    } else if (game.screen === 'victory') {
+      stopVictoryMusic();
+      game.screen = 'title';
     }
   }
 });
@@ -1984,14 +2063,23 @@ canvas.addEventListener('click', () => {
     playOink();
     game.score = 0;
     game.level = 1;
+    resurrectionCount = 0;
+    // Auto-fullscreen on mobile game start
+    if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
+      (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)?.call(document.documentElement).catch(() => {});
+    }
     startLevel();
   } else if (game.screen === 'gameOver') {
+    if (resurrectionState !== 'done') return; // Wait for resurrection sequence
     game.score = 0;
     game.level = 1;
     game.screen = 'title';
   } else if (game.screen === 'levelComplete') {
     game.level++;
     startLevel();
+  } else if (game.screen === 'victory') {
+    stopVictoryMusic();
+    game.screen = 'title';
   }
 });
 
@@ -2008,6 +2096,8 @@ if (isMobile) touchControlsEl.classList.add('visible');
 const activeTouches = {};
 
 function simulateKeyDown(keyName) {
+  // Don't process gameplay keys while paused
+  if (isPaused) return;
   // Simulate the same keydown event the keyboard handler uses
   const fakeEvent = { key: keyName, preventDefault: () => {} };
   // Set key state
@@ -2136,10 +2226,39 @@ function triggerDamage(fromBomb) {
   }
 
   if (game.cracks >= 3) {
+    isPaused = false;
     game.screen = 'gameOver';
     gameOverTimer = 0;
     stopMusic();
     playGameOver();
+    // Initialize laughing devils
+    gameOverDevils = [];
+    for (let i = 0; i < 4; i++) {
+      gameOverDevils.push({
+        x: WIDTH * 0.2 + i * (WIDTH * 0.2),
+        y: HEIGHT / 2 + 80,
+        emoji: i % 2 === 0 ? '\u{1F608}' : '\u{1F47F}',
+        phase: Math.random() * Math.PI * 2,
+        laughTimer: Math.random() * 2,
+        laughing: false,
+        fleeing: false,
+        fleeX: 0,
+        fleeSpeed: 0
+      });
+    }
+    resurrectionCost = 50 * game.level;
+    const canAfford = game.score >= resurrectionCost;
+    const angelChance = resurrectionCount === 0 ? 1.0 : 0.5;
+    const angelAppears = resurrectionCount < 2 && Math.random() < angelChance;
+    if (angelAppears && canAfford) {
+      resurrectionState = 'waiting';
+    } else if (angelAppears && !canAfford) {
+      resurrectionState = 'waiting_sad';
+    } else {
+      resurrectionState = 'done';
+    }
+    resurrectionTimer = 0;
+    angelY = -50;
   }
 }
 
@@ -2198,13 +2317,136 @@ function update(dt) {
     return;
   }
 
+  // Update victory screen
+  if (game.screen === 'victory') {
+    victoryTimer += dt;
+
+    // Update piglets (bounce and wander)
+    for (const p of victoryPiglets) {
+      p.x += p.vx * dt;
+      p.bouncePhase += dt * 5;
+      if (p.x < 100 || p.x > WIDTH - 100) p.vx *= -1;
+    }
+
+    // Update vegans (hearts)
+    for (const v of victoryVegans) {
+      v.heartTimer -= dt;
+      if (v.heartTimer <= 0) {
+        v.heartTimer = 1.5 + Math.random();
+      }
+    }
+
+    // Update angels (occasional firing)
+    for (const a of victoryAngels) {
+      a.fireTimer -= dt;
+      if (a.firing) {
+        a.fireAnim -= dt;
+        if (a.fireAnim <= 0) a.firing = false;
+      }
+      if (a.fireTimer <= 0 && !a.firing) {
+        a.firing = true;
+        a.fireAnim = 0.3;
+        a.fireTimer = 4 + Math.random() * 8;
+        playGunshotSound();
+      }
+    }
+
+    // Replay music every 5 seconds
+    victoryIntruderTimer += dt;
+    if (victoryIntruderTimer > 5) {
+      victoryIntruderTimer = 0;
+      playVictoryMusic();
+    }
+    return;
+  }
+
   // Update game over animation
   if (game.screen === 'gameOver') {
     gameOverTimer += dt;
+
+    // Update laughing devils
+    for (const d of gameOverDevils) {
+      d.laughTimer -= dt;
+      if (d.laughTimer <= 0 && !d.fleeing) {
+        d.laughing = true;
+        d.laughTimer = 1 + Math.random() * 2;
+      }
+      if (d.laughing && d.laughTimer > 0.5) d.laughing = false;
+      if (d.fleeing) {
+        d.x += d.fleeSpeed * dt;
+      }
+    }
+
+    // Resurrection sequence
+    if (resurrectionState === 'waiting' && gameOverTimer > 3.0) {
+      resurrectionState = 'angel_descend';
+      resurrectionTimer = 0;
+    }
+    if (resurrectionState === 'waiting_sad' && gameOverTimer > 3.0) {
+      resurrectionState = 'angel_descend_sad';
+      resurrectionTimer = 0;
+    }
+
+    if (resurrectionState === 'angel_descend' || resurrectionState === 'angel_descend_sad') {
+      resurrectionTimer += dt;
+      angelY = Math.min(HEIGHT / 2 - 80, -50 + resurrectionTimer * 100);
+      if (angelY >= HEIGHT / 2 - 80) {
+        if (resurrectionState === 'angel_descend') {
+          resurrectionState = 'scatter_devils';
+          resurrectionTimer = 0;
+          for (const d of gameOverDevils) {
+            d.fleeing = true;
+            d.laughing = false;
+            d.fleeSpeed = (d.x < WIDTH / 2 ? -1 : 1) * (300 + Math.random() * 200);
+          }
+        } else {
+          resurrectionState = 'angel_sad';
+          resurrectionTimer = 0;
+        }
+      }
+    }
+
+    if (resurrectionState === 'scatter_devils') {
+      resurrectionTimer += dt;
+      if (resurrectionTimer > 2.0) {
+        resurrectionState = 'resurrect';
+        resurrectionTimer = 0;
+      }
+    }
+
+    if (resurrectionState === 'resurrect') {
+      resurrectionTimer += dt;
+      if (resurrectionTimer > 2.0) {
+        game.score -= resurrectionCost;
+        game.cracks = 0;
+        resurrectionCount++;
+        game.screen = 'playing';
+        player.y = player.groundY;
+        player.vy = 0;
+        player.grounded = true;
+        game.latchedDevil = null;
+        resurrectionState = 'done';
+        startMusic();
+      }
+    }
+
+    if (resurrectionState === 'angel_sad') {
+      resurrectionTimer += dt;
+      if (resurrectionTimer > 3.0) {
+        angelY -= 100 * dt;
+      }
+      if (resurrectionTimer > 5.0) {
+        resurrectionState = 'done';
+      }
+    }
+
     return;
   }
 
   if (game.screen !== 'playing') return;
+
+  // Don't update gameplay while paused
+  if (isPaused) return;
 
   // Piggy bob timer
   piggyBobTimer += dt;
@@ -2255,19 +2497,24 @@ function update(dt) {
       shakeHintTimer = 0;
       devilTypeIndicator = null;
     }
-    game.screen = 'levelComplete';
-    levelCompleteTimer = 0;
     stopMusic();
-    playLevelComplete();
-    // Level complete confetti particles
-    const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
-    for (let i = 0; i < 18; i++) {
-      spawnParticles(
-        WIDTH * 0.2 + Math.random() * WIDTH * 0.6,
-        HEIGHT * 0.3 + Math.random() * 50,
-        confettiEmojis[i % confettiEmojis.length],
-        1, 350
-      );
+    if (game.level >= 10) {
+      game.screen = 'victory';
+      initVictoryScene();
+    } else {
+      game.screen = 'levelComplete';
+      levelCompleteTimer = 0;
+      playLevelComplete();
+      // Level complete confetti particles
+      const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
+      for (let i = 0; i < 18; i++) {
+        spawnParticles(
+          WIDTH * 0.2 + Math.random() * WIDTH * 0.6,
+          HEIGHT * 0.3 + Math.random() * 50,
+          confettiEmojis[i % confettiEmojis.length],
+          1, 350
+        );
+      }
     }
     return;
   }
@@ -3395,7 +3642,94 @@ function draw() {
     drawLevelComplete();
   } else if (game.screen === 'gameOver') {
     drawGameOver();
+  } else if (game.screen === 'victory') {
+    drawVictory();
   }
+
+  // Pause overlay (drawn on top of everything)
+  drawPauseMenu();
+}
+
+// --- Pause Menu ---
+function drawPauseMenu() {
+  if (!isPaused) return;
+
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Title
+  ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('\u23F8 PAUZA', WIDTH / 2, 60);
+
+  // Rules box
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.fillRect(50, 80, WIDTH - 100, HEIGHT - 130);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.strokeRect(50, 80, WIDTH - 100, HEIGHT - 130);
+
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff';
+
+  const rules = [
+    '\u{1F3AE} KONTROLE:',
+    '  \u2190 \u2192  Kretanje levo/desno',
+    '  \u2191     Skok',
+    '  \u2193     Brzo prizemljenje (u vazduhu) / Tresenje (\u0111avo na le\u0111ima)',
+    '  SPACE  Prde\u017E (gasi \u0111avole u vazduhu)',
+    '  \u2190 + \u2192  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  P/ESC  Pauza',
+    '',
+    '\u{1F4B0} SAKUPLJAJ:',
+    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (3)  \u{1F947} Zlatni (5)',
+    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)  \u{1F33D} Kukuruz (puni prde\u017Ee)',
+    '',
+    '\u26A0\uFE0F IZBEGAVAJ:',
+    '  \u{1F4A3} Bombe - eksplodiraju',
+    '  \u26A1 Munje - od nivoa 4 (upozorenje: \u017Euti blesak na oblaku)',
+    '',
+    '\u{1F47F} NEPRIJATELJI KOJI PADAJU:',
+    '  \u{1F608} \u0110avo brzi - tresi gore/dole da ga skine\u0161',
+    '  \u{1F47F} \u0110avo te\u0161ki - sporiji ali tra\u017Ei vi\u0161e tresenja',
+    '  \u{1F479} \u0110avo lopov - krade nov\u010Di\u0107e',
+    '  \u{1F52A} Kasapin - najte\u017Ei, skida srca',
+    '',
+    '\u{1F43A} NEPRIJATELJI NA ZEMLJI (od nivoa 3):',
+    '  \u{1F43A} Vuk - tr\u010Di pravo (presko\u010Di ga!)',
+    '  \u{1F969} Meso\u017Eder - juri te',
+    '  \u{1F98A} Lisica - lukava, staje i menja pravac',
+    '  \u{1F468}\u200D\u{1F33E} Farmer - spor ali uporan',
+    '',
+    '\u{1F33F} SAVEZNICI:',
+    '  \u{1F9D1}\u200D\u{1F33E} Vegan - brani te od meso\u017Edera i farmera',
+    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne (ako ima\u0161 dovoljno para!)',
+  ];
+
+  let y = 105;
+  for (const line of rules) {
+    if (line.startsWith('\u{1F3AE}') || line.startsWith('\u{1F4B0}') || line.startsWith('\u26A0') ||
+        line.startsWith('\u{1F47F}') || line.startsWith('\u{1F43A}') || line.startsWith('\u{1F33F}')) {
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#FFD700';
+    } else {
+      ctx.font = '14px sans-serif';
+      ctx.fillStyle = '#ddd';
+    }
+    ctx.fillText(line, 70, y);
+    y += line === '' ? 8 : 18;
+  }
+
+  // Resume hint
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4CAF50';
+  const pulse = Math.sin(Date.now() / 400) * 0.2 + 0.8;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
+  ctx.globalAlpha = 1;
 }
 
 // --- Intro Cutscene Drawing ---
@@ -3887,38 +4221,42 @@ function drawIntroScene5(t) {
   ctx.strokeStyle = '#ccc';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 280, 100, 560, 380, 20);
+  ctx.roundRect(WIDTH / 2 - 300, 70, 600, 460, 20);
   ctx.fill();
   ctx.stroke();
 
   // Header bar
   ctx.fillStyle = '#FFB6C1';
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 280, 100, 560, 50, [20, 20, 0, 0]);
+  ctx.roundRect(WIDTH / 2 - 300, 70, 600, 45, [20, 20, 0, 0]);
   ctx.fill();
 
   ctx.font = 'bold 24px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#333';
-  ctx.fillText('\u{1F3AE} Kako igrati', WIDTH / 2, 125);
+  ctx.fillText('\u{1F3AE} Kako igrati', WIDTH / 2, 93);
 
   // Tutorial entries
-  const startY = 175;
-  const lineH = 38;
+  const startY = 135;
+  const lineH = 34;
   ctx.textAlign = 'left';
   ctx.font = '20px sans-serif';
 
   const entries = [
-    { icon: '\u2B05 \u27A1', text: 'Kre\u0107i se levo-desno' },
-    { icon: '\u2B06 \u2B07', text: 'Otresi \u0111avole i kasapine' },
-    { icon: 'SPACE', text: 'Prdni oblak koji gu\u0161i neprijatelje! \u{1F4A8}' },
+    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno' },
+    { icon: '\u2B06', text: 'Skok' },
+    { icon: '\u2B07', text: 'Brzo sletanje / Otresi \u0111avole' },
+    { icon: 'SPACE', text: 'Prde\u017E oblak \u{1F4A8} (gasi \u0111avole!)' },
+    { icon: '\u2B05+\u27A1', text: 'Kakanje \u{1F4A9} (zamka za neprijatelje)' },
     { icon: '', text: '' }, // spacer
     { icon: '\u{1FA99}\u{1F4B5}\u{1F4B0}', text: 'Hvataj nov\u010Di\u0107e i nov\u010Danice!' },
-    { icon: '\u{1F4A3}', text: 'Izbegavaj bombe!' },
-    { icon: '\u{1F608}\u{1F47F}\u{1F479}', text: 'Pazi na \u0111avole!' },
-    { icon: '\u{1F9D1}\u200D\u{1F373}\u{1F52A}', text: 'Be\u017Ei od kasapina!' },
-    { icon: '\u{1F33D}', text: 'Jedi kukuruz za prde\u017E!' },
+    { icon: '\u{1F4A3}\u26A1', text: 'Izbegavaj bombe i munje!' },
+    { icon: '\u{1F608}\u{1F47F}\u{1F479}\u{1F52A}', text: '\u0110avoli i kasapin padaju odozgo' },
+    { icon: '\u{1F43A}\u{1F98A}\u{1F468}\u200D\u{1F33E}', text: 'Vuk, lisica, farmer tr\u010De po zemlji' },
+    { icon: '\u{1F33D}', text: 'Kukuruz = vi\u0161e prde\u017Ea!' },
+    { icon: '\u{1F9D1}\u200D\u{1F33E}', text: 'Vegan saveznik te brani!' },
+    { icon: '\u{1F47C}', text: 'An\u0111eo te vaskrsava (za novac)' },
   ];
 
   for (let i = 0; i < entries.length; i++) {
@@ -3934,20 +4272,20 @@ function drawIntroScene5(t) {
       ctx.strokeStyle = '#999';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(WIDTH / 2 - 240, y - 12, 70, 26, 5);
+      ctx.roundRect(WIDTH / 2 - 260, y - 12, 70, 26, 5);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = '#333';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('SPACE', WIDTH / 2 - 205, y + 2);
+      ctx.fillText('SPACE', WIDTH / 2 - 225, y + 2);
       ctx.textAlign = 'left';
     } else {
-      ctx.fillText(e.icon, WIDTH / 2 - 240, y);
+      ctx.fillText(e.icon, WIDTH / 2 - 260, y);
     }
-    ctx.font = '18px sans-serif';
+    ctx.font = '17px sans-serif';
     ctx.fillStyle = '#333';
-    ctx.fillText(e.text, WIDTH / 2 - 150, y);
+    ctx.fillText(e.text, WIDTH / 2 - 155, y);
   }
 
   // Bottom prompt
@@ -4787,6 +5125,346 @@ function drawPlayingScene() {
   drawHUD();
 }
 
+// --- Victory Scene Functions ---
+
+function initVictoryScene() {
+  victoryTimer = 0;
+  victoryPiglets = [];
+  victoryVegans = [];
+  victoryAngels = [];
+  victoryIntruderTimer = 0;
+
+  // 12 piglet siblings
+  for (let i = 0; i < 12; i++) {
+    victoryPiglets.push({
+      x: 150 + Math.random() * 500,
+      y: HEIGHT - 120 + Math.random() * 40,
+      vx: (Math.random() - 0.5) * 60,
+      bouncePhase: Math.random() * Math.PI * 2,
+      size: 18 + Math.random() * 8
+    });
+  }
+  // Main piggy (bigger)
+  victoryPiglets.push({
+    x: WIDTH / 2,
+    y: HEIGHT - 130,
+    vx: 20,
+    bouncePhase: 0,
+    size: 32,
+    isMain: true
+  });
+
+  // 3 vegans
+  for (let i = 0; i < 3; i++) {
+    victoryVegans.push({
+      x: 200 + i * 200,
+      y: HEIGHT - 140,
+      dir: 1,
+      heartTimer: Math.random() * 2
+    });
+  }
+
+  // 4 armed angels on perimeter
+  victoryAngels.push({ x: 50, y: HEIGHT - 180, dir: 1, fireTimer: 3 + Math.random() * 5, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: WIDTH - 50, y: HEIGHT - 180, dir: -1, fireTimer: 5 + Math.random() * 5, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: 120, y: HEIGHT - 220, dir: 1, fireTimer: 7 + Math.random() * 4, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: WIDTH - 120, y: HEIGHT - 220, dir: -1, fireTimer: 2 + Math.random() * 6, firing: false, fireAnim: 0 });
+
+  playVictoryMusic();
+}
+
+function playVictoryMusic() {
+  if (!audioCtx) return;
+  const ctx2 = audioCtx;
+  const now = ctx2.currentTime;
+  // C major peaceful melody - idyllic farm feel
+  const melody = [
+    { freq: 523, dur: 0.45 }, // C5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 784, dur: 0.45 }, // G5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 523, dur: 0.45 }, // C5
+    { freq: 587, dur: 0.45 }, // D5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 523, dur: 0.9 },  // C5 (held)
+  ];
+  let t = 0;
+  melody.forEach((note) => {
+    const osc = ctx2.createOscillator();
+    const gain = ctx2.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = note.freq;
+    gain.gain.setValueAtTime(0.08, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + t + note.dur - 0.05);
+    osc.connect(gain);
+    gain.connect(ctx2.destination);
+    osc.start(now + t);
+    osc.stop(now + t + note.dur);
+    t += note.dur;
+  });
+}
+
+function stopVictoryMusic() {
+  if (victoryMusicTimeout) {
+    clearTimeout(victoryMusicTimeout);
+    victoryMusicTimeout = null;
+  }
+}
+
+function playGunshotSound() {
+  if (!audioCtx) return;
+  const ctx2 = audioCtx;
+  const now = ctx2.currentTime;
+  // Sharp crack
+  const osc = ctx2.createOscillator();
+  const gain = ctx2.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+  gain.gain.setValueAtTime(0.3, now);
+  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+  osc.connect(gain);
+  gain.connect(ctx2.destination);
+  osc.start(now);
+  osc.stop(now + 0.2);
+}
+
+function drawVictory() {
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, HEIGHT * 0.6);
+  skyGrad.addColorStop(0, '#87CEEB');
+  skyGrad.addColorStop(1, '#E0F7FF');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Sun (bigger, brighter)
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(WIDTH - 80, 70, 45, 0, Math.PI * 2);
+  ctx.fill();
+  // Sun rays (rotating)
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2 + victoryTimer / 3;
+    ctx.beginPath();
+    ctx.moveTo(WIDTH - 80 + Math.cos(angle) * 50, 70 + Math.sin(angle) * 50);
+    ctx.lineTo(WIDTH - 80 + Math.cos(angle) * 68, 70 + Math.sin(angle) * 68);
+    ctx.stroke();
+  }
+
+  // Clouds
+  for (const cloud of skyClouds) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.beginPath();
+    ctx.arc(cloud.x, cloud.y, cloud.w * 0.25, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.25, cloud.y - cloud.w * 0.12, cloud.w * 0.3, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.5, cloud.y, cloud.w * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Rolling green hills
+  ctx.fillStyle = '#4CAF50';
+  ctx.beginPath();
+  ctx.moveTo(0, HEIGHT * 0.55);
+  for (let x = 0; x <= WIDTH; x += 20) {
+    ctx.lineTo(x, HEIGHT * 0.55 + Math.sin(x / 100 + 1) * 20);
+  }
+  ctx.lineTo(WIDTH, HEIGHT);
+  ctx.lineTo(0, HEIGHT);
+  ctx.fill();
+
+  // Darker grass foreground
+  ctx.fillStyle = '#388E3C';
+  ctx.beginPath();
+  ctx.moveTo(0, HEIGHT * 0.7);
+  for (let x = 0; x <= WIDTH; x += 15) {
+    ctx.lineTo(x, HEIGHT * 0.7 + Math.sin(x / 80 + 2) * 10);
+  }
+  ctx.lineTo(WIDTH, HEIGHT);
+  ctx.lineTo(0, HEIGHT);
+  ctx.fill();
+
+  // Red American barn
+  ctx.fillStyle = '#B22222';
+  ctx.fillRect(WIDTH / 2 - 80, HEIGHT * 0.35, 160, 100);
+  // Roof
+  ctx.fillStyle = '#8B0000';
+  ctx.beginPath();
+  ctx.moveTo(WIDTH / 2 - 100, HEIGHT * 0.35);
+  ctx.lineTo(WIDTH / 2, HEIGHT * 0.25);
+  ctx.lineTo(WIDTH / 2 + 100, HEIGHT * 0.35);
+  ctx.fill();
+  // Barn door
+  ctx.fillStyle = '#5B1010';
+  ctx.fillRect(WIDTH / 2 - 20, HEIGHT * 0.35 + 40, 40, 60);
+  // White X on barn
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 10);
+  ctx.lineTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 90);
+  ctx.moveTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 10);
+  ctx.lineTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 90);
+  ctx.stroke();
+
+  // White picket fence
+  ctx.fillStyle = '#fff';
+  for (let x = 20; x < WIDTH - 20; x += 25) {
+    ctx.fillRect(x, HEIGHT - 85, 6, 30);
+    // Pointed top
+    ctx.beginPath();
+    ctx.moveTo(x, HEIGHT - 85);
+    ctx.lineTo(x + 3, HEIGHT - 92);
+    ctx.lineTo(x + 6, HEIGHT - 85);
+    ctx.fill();
+  }
+  // Horizontal rails
+  ctx.fillRect(10, HEIGHT - 75, WIDTH - 20, 4);
+  ctx.fillRect(10, HEIGHT - 62, WIDTH - 20, 4);
+
+  // Flowers
+  const flowerColors = ['#FF69B4', '#FF6347', '#FFD700', '#FF4500', '#DA70D6'];
+  for (let i = 0; i < 20; i++) {
+    const fx = 50 + (i * 37) % (WIDTH - 100);
+    const fy = HEIGHT - 50 + Math.sin(i * 1.7) * 10;
+    ctx.fillStyle = flowerColors[i % flowerColors.length];
+    ctx.beginPath();
+    ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#228B22';
+    ctx.fillRect(fx - 1, fy, 2, 8);
+  }
+
+  // Vegans petting piglets
+  for (const v of victoryVegans) {
+    ctx.font = '36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('\u{1F9D1}\u200D\u{1F33E}', v.x, v.y);
+    // Floating hearts
+    const heartY = v.y - 30 - (1.5 - v.heartTimer) * 20;
+    const heartAlpha = Math.max(0, v.heartTimer / 1.5);
+    ctx.globalAlpha = heartAlpha;
+    ctx.font = '16px sans-serif';
+    ctx.fillText('\u2764\uFE0F', v.x + 15, heartY);
+    ctx.globalAlpha = 1;
+  }
+
+  // Piglets bouncing and playing
+  for (const p of victoryPiglets) {
+    const bounce = Math.abs(Math.sin(p.bouncePhase)) * 15;
+    ctx.font = `${p.size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(p.isMain ? '\u{1F437}' : '\u{1F43D}', p.x, p.y - bounce);
+  }
+
+  // Armed angels on perimeter
+  for (const a of victoryAngels) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    if (a.dir < 0) ctx.scale(-1, 1);
+
+    // Angel emoji
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F607}', 0, 0);
+
+    // Ammo belt (brown diagonal stripe across chest)
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-12, -8);
+    ctx.lineTo(12, 8);
+    ctx.stroke();
+    // Ammo dots on belt
+    ctx.fillStyle = '#DAA520';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(-10 + i * 5, -6 + i * 3.2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Machine gun
+    ctx.fillStyle = '#333';
+    ctx.fillRect(15, -4, 25, 6);
+    ctx.fillRect(15, -7, 5, 10);
+
+    // Muzzle flash when firing
+    if (a.firing && a.fireAnim > 0.15) {
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.moveTo(40, -1);
+      ctx.lineTo(55, -8);
+      ctx.lineTo(50, -1);
+      ctx.lineTo(55, 6);
+      ctx.closePath();
+      ctx.fill();
+
+      // "BANG!" text
+      ctx.save();
+      if (a.dir < 0) ctx.scale(-1, 1);
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#ff0000';
+      ctx.textAlign = 'center';
+      ctx.fillText('BANG!', 50, -20);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // Title text
+  ctx.font = 'bold 52px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 4;
+  ctx.strokeText('SLOBODA! \u{1F437}', WIDTH / 2, 50);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('SLOBODA! \u{1F437}', WIDTH / 2, 50);
+
+  ctx.font = '22px sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  const sub = 'Kasica i njena bra\u0107a i sestre \u017eive sre\u0107no zauvek...';
+  ctx.strokeText(sub, WIDTH / 2, 85);
+  ctx.fillText(sub, WIDTH / 2, 85);
+
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillStyle = '#FFD700';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText('Final Score: ' + game.score, WIDTH / 2, 120);
+  ctx.fillText('Final Score: ' + game.score, WIDTH / 2, 120);
+
+  // Thank you message (fades in after 3 seconds)
+  if (victoryTimer > 3) {
+    ctx.globalAlpha = Math.min(1, (victoryTimer - 3) / 2);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ff6699';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.globalAlpha = 1;
+  }
+
+  // Click to continue hint (after 5 seconds)
+  if (victoryTimer > 5) {
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(victoryTimer * 3);
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeText('Klikni za nastavak', WIDTH / 2, HEIGHT - 15);
+    ctx.fillText('Klikni za nastavak', WIDTH / 2, HEIGHT - 15);
+    ctx.globalAlpha = 1;
+  }
+}
+
 function drawLevelComplete() {
   // Celebratory background
   ctx.textAlign = 'center';
@@ -5070,13 +5748,92 @@ function drawGameOver() {
   ctx.fillStyle = '#dda050';
   ctx.fillText('Level: ' + game.level + '   \u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 50);
 
-  // Restart prompt
-  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
-  ctx.globalAlpha = pulse;
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillStyle = '#ffcc66';
-  ctx.fillText('Klikni za novu igru', WIDTH / 2, HEIGHT - 20);
-  ctx.globalAlpha = 1.0;
+  // --- Laughing devils around the spit ---
+  for (const d of gameOverDevils) {
+    if (d.x < -50 || d.x > WIDTH + 50) continue;
+    ctx.save();
+    ctx.translate(d.x, d.y + Math.sin(t * 3 + d.phase) * 10);
+    const scale = d.laughing ? 1.2 + Math.sin(t * 10) * 0.1 : 1.0;
+    ctx.scale(scale, scale);
+    ctx.font = '36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(d.emoji, 0, 0);
+    ctx.restore();
+    // "HA HA" text floating up when laughing
+    if (d.laughing) {
+      ctx.save();
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillStyle = '#ff4444';
+      ctx.textAlign = 'center';
+      const haY = d.y - 30 - Math.sin(t * 5) * 10;
+      ctx.globalAlpha = 0.7 + Math.sin(t * 8) * 0.3;
+      ctx.fillText('HA HA HA!', d.x, haY);
+      ctx.restore();
+    }
+  }
+
+  // --- Angel ---
+  if (resurrectionState !== 'none' && resurrectionState !== 'waiting' && resurrectionState !== 'waiting_sad' && resurrectionState !== 'done') {
+    ctx.save();
+    // Golden glow
+    ctx.fillStyle = 'rgba(255, 215, 0, ' + (0.2 + Math.sin(t * 4) * 0.1) + ')';
+    ctx.beginPath();
+    ctx.arc(WIDTH / 2, angelY, 50, 0, Math.PI * 2);
+    ctx.fill();
+    // Angel emoji
+    ctx.font = '48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F47C}', WIDTH / 2, angelY);
+    // Sparkles around angel
+    for (let i = 0; i < 6; i++) {
+      const angle = t * 2 + i * Math.PI / 3;
+      const sx = WIDTH / 2 + Math.cos(angle) * 35;
+      const sy = angelY + Math.sin(angle) * 25;
+      ctx.font = '14px sans-serif';
+      ctx.fillText('\u{2728}', sx, sy);
+    }
+    ctx.restore();
+  }
+
+  // Resurrection text
+  if (resurrectionState === 'resurrect') {
+    ctx.save();
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+    ctx.strokeText('VASKRSNU\u0106E! -' + resurrectionCost + ' bodova', WIDTH / 2, HEIGHT - 80);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('VASKRSNU\u0106E! -' + resurrectionCost + ' bodova', WIDTH / 2, HEIGHT - 80);
+    ctx.restore();
+  }
+
+  // Sad angel text
+  if (resurrectionState === 'angel_sad') {
+    ctx.save();
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+    const msg = 'Nema\u0161 dovoljno para za opro\u0161taj grehova! (treba: ' + resurrectionCost + ')';
+    ctx.strokeText(msg, WIDTH / 2, HEIGHT - 80);
+    ctx.fillStyle = '#ff6666';
+    ctx.fillText(msg, WIDTH / 2, HEIGHT - 80);
+    ctx.restore();
+  }
+
+  // Restart prompt (only when resurrection sequence is done)
+  if (resurrectionState === 'done') {
+    const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
+    ctx.globalAlpha = pulse;
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = '#ffcc66';
+    ctx.textAlign = 'center';
+    ctx.fillText('Klikni za novu igru', WIDTH / 2, HEIGHT - 20);
+    ctx.globalAlpha = 1.0;
+  }
 }
 
 // --- Game Loop ---
@@ -5090,11 +5847,14 @@ function gameLoop(timestamp) {
   draw();
 
   // Show/hide mobile controls based on game state
+  const pauseBtnEl = document.getElementById('pauseBtn');
   if (isMobile) {
     if (game.screen === 'playing') {
       touchControlsEl.classList.add('visible');
+      pauseBtnEl.style.display = 'block';
     } else {
       touchControlsEl.classList.remove('visible');
+      pauseBtnEl.style.display = 'none';
       // Release all keys when leaving playing state
       Object.keys(keys).forEach(k => keys[k] = false);
     }
