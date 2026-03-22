@@ -2537,30 +2537,53 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
   }, { passive: false });
 });
 
-// --- Mobile Touch Zones (canvas-based, replaces DOM buttons) ---
+// --- Mobile Touch Zones (canvas-based, gamepad-style layout) ---
 const MOBILE_SCALE = isMobile ? 1.4 : 1.0;
-const TOUCH_ZONE_H = Math.floor(HEIGHT * 0.35); // bottom 35% of canvas
-const TOUCH_ZONE_TOP = HEIGHT - TOUCH_ZONE_H;
 
-// Zone definitions: divide bottom strip into 5 zones
+// Gamepad-style button layout:
+//   Left side:    Right side:
+//    [▲ SKOK]      [💩 GOVNO]
+//    [◀ LEVO]      [▶ DESNO]
+//                  [💨 PRDEŽ]
+// Buttons are round/pill-shaped, positioned at thumbs-reach
+
+const BTN_W = 150;   // button width
+const BTN_H = 100;   // button height
+const BTN_R = 20;    // corner radius
+const PAD = 15;      // padding from edges
+const VGAP = 10;     // vertical gap between buttons
+
+// Precompute button positions (called once, recalc not needed since canvas is fixed)
 const mobileZones = [
-  { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',  color: 'rgba(100,150,255,', xFrac: 0, wFrac: 0.20 },
-  { id: 'fart',  key: ' ',          icon: '\uD83D\uDCA8', label: 'PRDNI', color: 'rgba(100,200,50,',  xFrac: 0.20, wFrac: 0.20 },
-  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',  color: 'rgba(136,102,0,',   xFrac: 0.40, wFrac: 0.20 },
-  { id: 'shake', key: 'ShakeUpDown', icon: '\u25B2\u25BC', label: 'TRESI', color: 'rgba(200,200,50,',  xFrac: 0.60, wFrac: 0.15 },
-  { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO', color: 'rgba(100,150,255,', xFrac: 0.75, wFrac: 0.25 }
+  // Left side - bottom left
+  { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',
+    color: 'rgba(100,150,255,',
+    x: PAD, y: HEIGHT - PAD - BTN_H, w: BTN_W, h: BTN_H },
+  // Jump - above left button
+  { id: 'jump',  key: 'ArrowUp',    icon: '\u25B2', label: 'SKOK',
+    color: 'rgba(255,220,50,',
+    x: PAD, y: HEIGHT - PAD - BTN_H - VGAP - BTN_H, w: BTN_W, h: BTN_H },
+  // Right side - bottom right
+  { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO',
+    color: 'rgba(100,150,255,',
+    x: WIDTH - PAD - BTN_W, y: HEIGHT - PAD - BTN_H - VGAP - BTN_H, w: BTN_W, h: BTN_H },
+  // Fart - below right button
+  { id: 'fart',  key: ' ',          icon: '\uD83D\uDCA8', label: 'PRDNI',
+    color: 'rgba(100,200,50,',
+    x: WIDTH - PAD - BTN_W, y: HEIGHT - PAD - BTN_H, w: BTN_W, h: BTN_H },
+  // Poop - above right button
+  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',
+    color: 'rgba(136,102,0,',
+    x: WIDTH - PAD - BTN_W, y: HEIGHT - PAD - BTN_H - VGAP - BTN_H - VGAP - BTN_H, w: BTN_W, h: BTN_H }
 ];
 
-// Compute pixel rects for zones
+// For hit-testing
 function getZoneRects() {
-  return mobileZones.map(z => ({
-    ...z,
-    x: Math.floor(z.xFrac * WIDTH),
-    y: TOUCH_ZONE_TOP,
-    w: Math.floor(z.wFrac * WIDTH),
-    h: TOUCH_ZONE_H
-  }));
+  return mobileZones;
 }
+
+// Zone top = highest button position (for hit test boundary)
+const TOUCH_ZONE_TOP = Math.min(...mobileZones.map(z => z.y)) - 10;
 
 function touchToCanvas(touch) {
   const rect = canvas.getBoundingClientRect();
@@ -2576,8 +2599,8 @@ const canvasTouches = {};
 const activeZones = {};
 
 function getZoneAtPoint(cx, cy) {
-  if (cy < TOUCH_ZONE_TOP) return null;
   const zones = getZoneRects();
+  // Find closest button if within its bounds
   for (const z of zones) {
     if (cx >= z.x && cx < z.x + z.w && cy >= z.y && cy < z.y + z.h) {
       return z;
@@ -2593,15 +2616,9 @@ let shakeRepeatTimer = null;
 
 function activateZone(zone) {
   activeZones[zone.id] = true;
-  if (zone.id === 'shake') {
-    // Alternate ArrowUp / ArrowDown rapidly
-    if (!shakeZoneHeld) {
-      shakeZoneHeld = true;
-      shakeToggle = false;
-      doShakeTick();
-      // Repeat every 120ms for rapid shake
-      shakeRepeatTimer = setInterval(doShakeTick, 120);
-    }
+  if (zone.id === 'jump') {
+    // Jump = ArrowUp (also shakes off enemies)
+    simulateKeyDown('ArrowUp');
   } else if (zone.id === 'poop') {
     simulateKeyDown('Poop');
   } else {
@@ -2620,11 +2637,8 @@ function doShakeTick() {
 
 function deactivateZone(zone) {
   delete activeZones[zone.id];
-  if (zone.id === 'shake') {
-    shakeZoneHeld = false;
-    if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+  if (zone.id === 'jump') {
     simulateKeyUp('ArrowUp');
-    simulateKeyUp('ArrowDown');
   } else if (zone.id === 'poop') {
     simulateKeyUp('Poop');
   } else {
@@ -2724,7 +2738,7 @@ canvas.addEventListener('touchcancel', (e) => {
   recalcZonesFromTouches();
 }, { passive: false });
 
-// --- Draw Mobile Touch Zones on Canvas ---
+// --- Draw Mobile Touch Zones on Canvas (gamepad-style buttons) ---
 function drawMobileTouchZones() {
   if (!isMobile) return;
   const zones = getZoneRects();
@@ -2732,39 +2746,40 @@ function drawMobileTouchZones() {
   for (const z of zones) {
     const isActive = !!activeZones[z.id];
 
-    // Background tint
-    ctx.fillStyle = z.color + (isActive ? '0.20)' : '0.08)');
-    ctx.fillRect(z.x, z.y, z.w, z.h);
-
-    // Border lines between zones
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
+    // Rounded button background
+    ctx.fillStyle = z.color + (isActive ? '0.35)' : '0.12)');
     ctx.beginPath();
-    ctx.moveTo(z.x, z.y);
-    ctx.lineTo(z.x, z.y + z.h);
+    ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
+    ctx.fill();
+
+    // Button border
+    ctx.strokeStyle = z.color + (isActive ? '0.8)' : '0.3)');
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
     ctx.stroke();
 
-    // Top border of zone area
-    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-    ctx.beginPath();
-    ctx.moveTo(z.x, z.y);
-    ctx.lineTo(z.x + z.w, z.y);
-    ctx.stroke();
+    // Pressed effect - inner glow
+    if (isActive) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.roundRect(z.x + 4, z.y + 4, z.w - 8, z.h - 8, BTN_R - 4);
+      ctx.fill();
+    }
 
     // Icon
-    const iconAlpha = isActive ? 0.8 : 0.3;
-    ctx.globalAlpha = iconAlpha;
-    ctx.font = '44px sans-serif';
+    ctx.globalAlpha = isActive ? 0.9 : 0.4;
+    ctx.font = '40px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.icon, z.x + z.w / 2, z.y + z.h * 0.42);
+    ctx.fillText(z.icon, z.x + z.w / 2, z.y + z.h * 0.4);
 
     // Label text below icon
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = 'bold 14px sans-serif';
     ctx.globalAlpha = isActive ? 0.7 : 0.25;
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.label, z.x + z.w / 2, z.y + z.h * 0.78);
+    ctx.fillText(z.label, z.x + z.w / 2, z.y + z.h * 0.75);
 
     ctx.globalAlpha = 1.0;
   }
