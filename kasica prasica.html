@@ -2647,8 +2647,18 @@ let shakeRepeatTimer = null;
 function activateZone(zone) {
   activeZones[zone.id] = true;
   if (zone.id === 'jump') {
-    // Jump = ArrowUp (also shakes off enemies)
-    simulateKeyDown('ArrowUp');
+    if (game.latchedDevil) {
+      // Devil/butcher latched: rapid shake (alternate up/down)
+      if (!shakeZoneHeld) {
+        shakeZoneHeld = true;
+        shakeToggle = false;
+        doShakeTick();
+        shakeRepeatTimer = setInterval(doShakeTick, 120);
+      }
+    } else {
+      // Normal jump
+      simulateKeyDown('ArrowUp');
+    }
   } else if (zone.id === 'poop') {
     simulateKeyDown('Poop');
   } else {
@@ -2668,7 +2678,11 @@ function doShakeTick() {
 function deactivateZone(zone) {
   delete activeZones[zone.id];
   if (zone.id === 'jump') {
+    // Stop shake if it was active
+    shakeZoneHeld = false;
+    if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
     simulateKeyUp('ArrowUp');
+    simulateKeyUp('ArrowDown');
   } else if (zone.id === 'poop') {
     simulateKeyUp('Poop');
   } else {
