@@ -433,7 +433,7 @@ let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
   wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 88, ai: 'straight', fromLevel: 3, size: 64 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 98, ai: 'chase', fromLevel: 4, size: 40 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 65, ai: 'chase', fromLevel: 4, size: 40 },
   fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 137, ai: 'cunning', fromLevel: 5, size: 38 },
   farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 74, ai: 'relentless', fromLevel: 6, size: 42 }
 };
@@ -3146,7 +3146,7 @@ function update(dt) {
   if (game.level >= 3) {
     groundEnemySpawnTimer -= dt;
     if (groundEnemySpawnTimer <= 0) {
-      groundEnemySpawnTimer = Math.max(2.0, (4 - game.level * 0.3) * 1.33);
+      groundEnemySpawnTimer = Math.max(3.0, (5.5 - game.level * 0.3) * 1.33);
       const available = Object.entries(GROUND_ENEMY_TYPES)
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
