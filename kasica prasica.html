@@ -2693,8 +2693,15 @@ canvas.addEventListener('touchend', (e) => {
 
   // Non-playing screens: tap = click to advance
   if (game.screen !== 'playing') {
-    // Fire the click handler directly for menu navigation
-    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+    // Pass real touch coordinates into the synthetic click event
+    // so shop button hit-testing works correctly
+    const touch = e.changedTouches[0];
+    const clickEvent = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      clientX: touch ? touch.clientX : 0,
+      clientY: touch ? touch.clientY : 0
+    });
     canvas.dispatchEvent(clickEvent);
     return;
   }
@@ -5011,10 +5018,13 @@ function handleShopClick(e) {
     }
   }
 
-  // Check skip button
+  // Check skip button - on mobile, the entire bottom area works as skip
   if (shopSkipRect) {
     var sr = shopSkipRect;
-    if (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h) {
+    var hitSkip = (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h);
+    // On mobile: also allow tap on bottom 30% of screen as skip
+    if (isMobile && clickY > HEIGHT * 0.7) hitSkip = true;
+    if (hitSkip) {
       game.level++;
       startLevel();
     }
