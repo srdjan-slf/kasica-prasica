@@ -2557,58 +2557,51 @@ document.querySelectorAll('.touch-btn').forEach(btn => {
 const MOBILE_SCALE = isMobile ? 1.4 : 1.0;
 
 // Layout:
-//   Left side:           Right side:
-//    [▲ SKOK]              [💩 SERI]
-//    [◀ LEVO]              [▶ DESNO]   ← same height!
-//                          [💨 PRDNI]
-//
-// LEVO/DESNO: 40% taller, at edges, same Y level
-// SKOK/SERI/PRDNI: glued to LEVO/DESNO with 5% width margin, tall so can't miss
+//   Left side:                Right side:
+//    [◀ LEVO]                   [💩 SERI]
+//    [▲ SKOK]                   [▶ DESNO]  ← same height as LEVO
+//                               [💨 PRDNI]
 
 const BTN_R = 18;    // corner radius
 const PAD = 10;      // padding from screen edges
-const MARGIN = Math.floor(WIDTH * 0.05);  // 5% width gap between main and action buttons
+const MARGIN = Math.floor(WIDTH * 0.05);  // 5% width gap
 
-// Main directional buttons (LEVO / DESNO) - 40% taller
+// LEVO / DESNO - same width, centered vertically, LEVO slightly taller
 const DIR_W = 140;
-const DIR_H = 140;   // 100 * 1.4 = 140
-// Center vertically: middle of screen
-const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);
+const DIR_H = 160;   // slightly taller than before
+const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);  // centered
 
-// Action buttons glued next to directional, fill remaining vertical space
-const ACT_W = 130;   // action button width
-// SKOK sits next to LEVO, glued with MARGIN gap
-const JUMP_X = PAD + DIR_W + MARGIN;
-const JUMP_H = DIR_H;  // same height as directional
-const JUMP_Y = DIR_Y;  // same level
+// SKOK - below LEVO, same width, with small gap
+const JUMP_GAP = 8;
+const JUMP_H = 100;
+const JUMP_Y = DIR_Y + DIR_H + JUMP_GAP;
 
-// SERI sits next to DESNO, top half
+// Action buttons next to DESNO
+const ACT_W = 130;
 const POOP_X = WIDTH - PAD - DIR_W - MARGIN - ACT_W;
 const POOP_H = Math.floor((DIR_H - 8) / 2);
 const POOP_Y = DIR_Y;
-
-// PRDNI sits below SERI
 const FART_H = DIR_H - POOP_H - 8;
 const FART_Y = POOP_Y + POOP_H + 8;
 
 const mobileZones = [
-  // LEVO - bottom left, tall
+  // LEVO - left side, centered vertically
   { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',
     color: 'rgba(100,150,255,',
     x: PAD, y: DIR_Y, w: DIR_W, h: DIR_H },
-  // SKOK - glued right of LEVO
+  // SKOK - directly below LEVO, same width
   { id: 'jump',  key: 'ArrowUp',    icon: '\u25B2', label: 'SKOK',
     color: 'rgba(255,220,50,',
-    x: JUMP_X, y: JUMP_Y, w: ACT_W, h: JUMP_H },
-  // DESNO - bottom right, tall, same Y as LEVO
+    x: PAD, y: JUMP_Y, w: DIR_W, h: JUMP_H },
+  // DESNO - right side, same Y as LEVO
   { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO',
     color: 'rgba(100,150,255,',
     x: WIDTH - PAD - DIR_W, y: DIR_Y, w: DIR_W, h: DIR_H },
-  // SERI - glued left of DESNO, top half
+  // SERI - left of DESNO, top half
   { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',
     color: 'rgba(136,102,0,',
     x: POOP_X, y: POOP_Y, w: ACT_W, h: POOP_H },
-  // PRDNI - glued left of DESNO, bottom half
+  // PRDNI - left of DESNO, bottom half
   { id: 'fart',  key: ' ',          icon: '\uD83D\uDCA8', label: 'PRDNI',
     color: 'rgba(100,200,50,',
     x: POOP_X, y: FART_Y, w: ACT_W, h: FART_H }
