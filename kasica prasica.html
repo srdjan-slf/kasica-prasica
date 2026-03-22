@@ -83,10 +83,45 @@
     background: rgba(136, 102, 0, 0.5);
     border-color: rgba(136, 102, 0, 0.9);
   }
+  #fullscreenBtn {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    color: white;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 8px;
+    font-size: 20px;
+    padding: 6px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #fullscreenBtn:hover { background: rgba(0,0,0,0.6); }
+  #pauseBtn {
+    display: none;
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    color: white;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 8px;
+    font-size: 20px;
+    padding: 6px 10px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #pauseBtn:hover { background: rgba(0,0,0,0.6); }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
+<button id="fullscreenBtn" onclick="toggleFullscreen()">&#x26F6;</button>
+<button id="pauseBtn" onclick="if(game.screen==='playing'){isPaused=!isPaused;}">&#x23F8;</button>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
@@ -117,6 +152,18 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 100); });
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) elem.requestFullscreen();
+    else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+  } else {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+}
 
 // --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
@@ -226,6 +273,9 @@ let resurrectionTimer = 0;
 let angelY = -50;
 let resurrectionCount = 0;
 let resurrectionCost = 0;
+
+// --- Pause State ---
+let isPaused = false;
 
 // --- Victory Screen State ---
 let victoryTimer = 0;
@@ -1871,6 +1921,7 @@ function startLevel() {
   player.facing = 0;
   player.facingSmooth = 0;
 
+  isPaused = false;
   game.screen = 'playing';
   startMusic();
 }
@@ -1881,6 +1932,17 @@ window.addEventListener('keydown', (e) => {
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
     e.preventDefault();
   }
+
+  // Pause toggle
+  if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && game.screen === 'playing') {
+    isPaused = !isPaused;
+    e.preventDefault();
+    return;
+  }
+
+  // Don't process gameplay keys while paused
+  if (isPaused) return;
+
   keys[e.key] = true;
 
   // Jump (only when grounded and no latched devil)
@@ -2002,6 +2064,10 @@ canvas.addEventListener('click', () => {
     game.score = 0;
     game.level = 1;
     resurrectionCount = 0;
+    // Auto-fullscreen on mobile game start
+    if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
+      (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)?.call(document.documentElement).catch(() => {});
+    }
     startLevel();
   } else if (game.screen === 'gameOver') {
     if (resurrectionState !== 'done') return; // Wait for resurrection sequence
@@ -2030,6 +2096,8 @@ if (isMobile) touchControlsEl.classList.add('visible');
 const activeTouches = {};
 
 function simulateKeyDown(keyName) {
+  // Don't process gameplay keys while paused
+  if (isPaused) return;
   // Simulate the same keydown event the keyboard handler uses
   const fakeEvent = { key: keyName, preventDefault: () => {} };
   // Set key state
@@ -2158,6 +2226,7 @@ function triggerDamage(fromBomb) {
   }
 
   if (game.cracks >= 3) {
+    isPaused = false;
     game.screen = 'gameOver';
     gameOverTimer = 0;
     stopMusic();
@@ -2375,6 +2444,9 @@ function update(dt) {
   }
 
   if (game.screen !== 'playing') return;
+
+  // Don't update gameplay while paused
+  if (isPaused) return;
 
   // Piggy bob timer
   piggyBobTimer += dt;
@@ -3573,6 +3645,91 @@ function draw() {
   } else if (game.screen === 'victory') {
     drawVictory();
   }
+
+  // Pause overlay (drawn on top of everything)
+  drawPauseMenu();
+}
+
+// --- Pause Menu ---
+function drawPauseMenu() {
+  if (!isPaused) return;
+
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Title
+  ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('\u23F8 PAUZA', WIDTH / 2, 60);
+
+  // Rules box
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.fillRect(50, 80, WIDTH - 100, HEIGHT - 130);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.strokeRect(50, 80, WIDTH - 100, HEIGHT - 130);
+
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff';
+
+  const rules = [
+    '\u{1F3AE} KONTROLE:',
+    '  \u2190 \u2192  Kretanje levo/desno',
+    '  \u2191     Skok',
+    '  \u2193     Brzo prizemljenje (u vazduhu) / Tresenje (\u0111avo na le\u0111ima)',
+    '  SPACE  Prde\u017E (gasi \u0111avole u vazduhu)',
+    '  \u2190 + \u2192  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  P/ESC  Pauza',
+    '',
+    '\u{1F4B0} SAKUPLJAJ:',
+    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (3)  \u{1F947} Zlatni (5)',
+    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)  \u{1F33D} Kukuruz (puni prde\u017Ee)',
+    '',
+    '\u26A0\uFE0F IZBEGAVAJ:',
+    '  \u{1F4A3} Bombe - eksplodiraju',
+    '  \u26A1 Munje - od nivoa 4 (upozorenje: \u017Euti blesak na oblaku)',
+    '',
+    '\u{1F47F} NEPRIJATELJI KOJI PADAJU:',
+    '  \u{1F608} \u0110avo brzi - tresi gore/dole da ga skine\u0161',
+    '  \u{1F47F} \u0110avo te\u0161ki - sporiji ali tra\u017Ei vi\u0161e tresenja',
+    '  \u{1F479} \u0110avo lopov - krade nov\u010Di\u0107e',
+    '  \u{1F52A} Kasapin - najte\u017Ei, skida srca',
+    '',
+    '\u{1F43A} NEPRIJATELJI NA ZEMLJI (od nivoa 3):',
+    '  \u{1F43A} Vuk - tr\u010Di pravo (presko\u010Di ga!)',
+    '  \u{1F969} Meso\u017Eder - juri te',
+    '  \u{1F98A} Lisica - lukava, staje i menja pravac',
+    '  \u{1F468}\u200D\u{1F33E} Farmer - spor ali uporan',
+    '',
+    '\u{1F33F} SAVEZNICI:',
+    '  \u{1F9D1}\u200D\u{1F33E} Vegan - brani te od meso\u017Edera i farmera',
+    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne (ako ima\u0161 dovoljno para!)',
+  ];
+
+  let y = 105;
+  for (const line of rules) {
+    if (line.startsWith('\u{1F3AE}') || line.startsWith('\u{1F4B0}') || line.startsWith('\u26A0') ||
+        line.startsWith('\u{1F47F}') || line.startsWith('\u{1F43A}') || line.startsWith('\u{1F33F}')) {
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#FFD700';
+    } else {
+      ctx.font = '14px sans-serif';
+      ctx.fillStyle = '#ddd';
+    }
+    ctx.fillText(line, 70, y);
+    y += line === '' ? 8 : 18;
+  }
+
+  // Resume hint
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#4CAF50';
+  const pulse = Math.sin(Date.now() / 400) * 0.2 + 0.8;
+  ctx.globalAlpha = pulse;
+  ctx.fillText('Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
+  ctx.globalAlpha = 1;
 }
 
 // --- Intro Cutscene Drawing ---
@@ -4064,38 +4221,42 @@ function drawIntroScene5(t) {
   ctx.strokeStyle = '#ccc';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 280, 100, 560, 380, 20);
+  ctx.roundRect(WIDTH / 2 - 300, 70, 600, 460, 20);
   ctx.fill();
   ctx.stroke();
 
   // Header bar
   ctx.fillStyle = '#FFB6C1';
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 280, 100, 560, 50, [20, 20, 0, 0]);
+  ctx.roundRect(WIDTH / 2 - 300, 70, 600, 45, [20, 20, 0, 0]);
   ctx.fill();
 
   ctx.font = 'bold 24px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#333';
-  ctx.fillText('\u{1F3AE} Kako igrati', WIDTH / 2, 125);
+  ctx.fillText('\u{1F3AE} Kako igrati', WIDTH / 2, 93);
 
   // Tutorial entries
-  const startY = 175;
-  const lineH = 38;
+  const startY = 135;
+  const lineH = 34;
   ctx.textAlign = 'left';
   ctx.font = '20px sans-serif';
 
   const entries = [
-    { icon: '\u2B05 \u27A1', text: 'Kre\u0107i se levo-desno' },
-    { icon: '\u2B06 \u2B07', text: 'Otresi \u0111avole i kasapine' },
-    { icon: 'SPACE', text: 'Prdni oblak koji gu\u0161i neprijatelje! \u{1F4A8}' },
+    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno' },
+    { icon: '\u2B06', text: 'Skok' },
+    { icon: '\u2B07', text: 'Brzo sletanje / Otresi \u0111avole' },
+    { icon: 'SPACE', text: 'Prde\u017E oblak \u{1F4A8} (gasi \u0111avole!)' },
+    { icon: '\u2B05+\u27A1', text: 'Kakanje \u{1F4A9} (zamka za neprijatelje)' },
     { icon: '', text: '' }, // spacer
     { icon: '\u{1FA99}\u{1F4B5}\u{1F4B0}', text: 'Hvataj nov\u010Di\u0107e i nov\u010Danice!' },
-    { icon: '\u{1F4A3}', text: 'Izbegavaj bombe!' },
-    { icon: '\u{1F608}\u{1F47F}\u{1F479}', text: 'Pazi na \u0111avole!' },
-    { icon: '\u{1F9D1}\u200D\u{1F373}\u{1F52A}', text: 'Be\u017Ei od kasapina!' },
-    { icon: '\u{1F33D}', text: 'Jedi kukuruz za prde\u017E!' },
+    { icon: '\u{1F4A3}\u26A1', text: 'Izbegavaj bombe i munje!' },
+    { icon: '\u{1F608}\u{1F47F}\u{1F479}\u{1F52A}', text: '\u0110avoli i kasapin padaju odozgo' },
+    { icon: '\u{1F43A}\u{1F98A}\u{1F468}\u200D\u{1F33E}', text: 'Vuk, lisica, farmer tr\u010De po zemlji' },
+    { icon: '\u{1F33D}', text: 'Kukuruz = vi\u0161e prde\u017Ea!' },
+    { icon: '\u{1F9D1}\u200D\u{1F33E}', text: 'Vegan saveznik te brani!' },
+    { icon: '\u{1F47C}', text: 'An\u0111eo te vaskrsava (za novac)' },
   ];
 
   for (let i = 0; i < entries.length; i++) {
@@ -4111,20 +4272,20 @@ function drawIntroScene5(t) {
       ctx.strokeStyle = '#999';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(WIDTH / 2 - 240, y - 12, 70, 26, 5);
+      ctx.roundRect(WIDTH / 2 - 260, y - 12, 70, 26, 5);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = '#333';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('SPACE', WIDTH / 2 - 205, y + 2);
+      ctx.fillText('SPACE', WIDTH / 2 - 225, y + 2);
       ctx.textAlign = 'left';
     } else {
-      ctx.fillText(e.icon, WIDTH / 2 - 240, y);
+      ctx.fillText(e.icon, WIDTH / 2 - 260, y);
     }
-    ctx.font = '18px sans-serif';
+    ctx.font = '17px sans-serif';
     ctx.fillStyle = '#333';
-    ctx.fillText(e.text, WIDTH / 2 - 150, y);
+    ctx.fillText(e.text, WIDTH / 2 - 155, y);
   }
 
   // Bottom prompt
@@ -5686,11 +5847,14 @@ function gameLoop(timestamp) {
   draw();
 
   // Show/hide mobile controls based on game state
+  const pauseBtnEl = document.getElementById('pauseBtn');
   if (isMobile) {
     if (game.screen === 'playing') {
       touchControlsEl.classList.add('visible');
+      pauseBtnEl.style.display = 'block';
     } else {
       touchControlsEl.classList.remove('visible');
+      pauseBtnEl.style.display = 'none';
       // Release all keys when leaving playing state
       Object.keys(keys).forEach(k => keys[k] = false);
     }
