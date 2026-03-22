@@ -227,6 +227,14 @@ let angelY = -50;
 let resurrectionCount = 0;
 let resurrectionCost = 0;
 
+// --- Victory Screen State ---
+let victoryTimer = 0;
+let victoryPiglets = [];
+let victoryAngels = [];
+let victoryVegans = [];
+let victoryIntruderTimer = 0;
+let victoryMusicTimeout = null;
+
 // --- Intro Music ---
 let introMusicNodes = [];
 let introMusicTimeout = null;
@@ -1959,6 +1967,9 @@ window.addEventListener('keydown', (e) => {
     } else if (game.screen === 'levelComplete') {
       game.level++;
       startLevel();
+    } else if (game.screen === 'victory') {
+      stopVictoryMusic();
+      game.screen = 'title';
     }
   }
 });
@@ -2000,6 +2011,9 @@ canvas.addEventListener('click', () => {
   } else if (game.screen === 'levelComplete') {
     game.level++;
     startLevel();
+  } else if (game.screen === 'victory') {
+    stopVictoryMusic();
+    game.screen = 'title';
   }
 });
 
@@ -2234,6 +2248,49 @@ function update(dt) {
     return;
   }
 
+  // Update victory screen
+  if (game.screen === 'victory') {
+    victoryTimer += dt;
+
+    // Update piglets (bounce and wander)
+    for (const p of victoryPiglets) {
+      p.x += p.vx * dt;
+      p.bouncePhase += dt * 5;
+      if (p.x < 100 || p.x > WIDTH - 100) p.vx *= -1;
+    }
+
+    // Update vegans (hearts)
+    for (const v of victoryVegans) {
+      v.heartTimer -= dt;
+      if (v.heartTimer <= 0) {
+        v.heartTimer = 1.5 + Math.random();
+      }
+    }
+
+    // Update angels (occasional firing)
+    for (const a of victoryAngels) {
+      a.fireTimer -= dt;
+      if (a.firing) {
+        a.fireAnim -= dt;
+        if (a.fireAnim <= 0) a.firing = false;
+      }
+      if (a.fireTimer <= 0 && !a.firing) {
+        a.firing = true;
+        a.fireAnim = 0.3;
+        a.fireTimer = 4 + Math.random() * 8;
+        playGunshotSound();
+      }
+    }
+
+    // Replay music every 5 seconds
+    victoryIntruderTimer += dt;
+    if (victoryIntruderTimer > 5) {
+      victoryIntruderTimer = 0;
+      playVictoryMusic();
+    }
+    return;
+  }
+
   // Update game over animation
   if (game.screen === 'gameOver') {
     gameOverTimer += dt;
@@ -2368,19 +2425,24 @@ function update(dt) {
       shakeHintTimer = 0;
       devilTypeIndicator = null;
     }
-    game.screen = 'levelComplete';
-    levelCompleteTimer = 0;
     stopMusic();
-    playLevelComplete();
-    // Level complete confetti particles
-    const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
-    for (let i = 0; i < 18; i++) {
-      spawnParticles(
-        WIDTH * 0.2 + Math.random() * WIDTH * 0.6,
-        HEIGHT * 0.3 + Math.random() * 50,
-        confettiEmojis[i % confettiEmojis.length],
-        1, 350
-      );
+    if (game.level >= 10) {
+      game.screen = 'victory';
+      initVictoryScene();
+    } else {
+      game.screen = 'levelComplete';
+      levelCompleteTimer = 0;
+      playLevelComplete();
+      // Level complete confetti particles
+      const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
+      for (let i = 0; i < 18; i++) {
+        spawnParticles(
+          WIDTH * 0.2 + Math.random() * WIDTH * 0.6,
+          HEIGHT * 0.3 + Math.random() * 50,
+          confettiEmojis[i % confettiEmojis.length],
+          1, 350
+        );
+      }
     }
     return;
   }
@@ -3508,6 +3570,8 @@ function draw() {
     drawLevelComplete();
   } else if (game.screen === 'gameOver') {
     drawGameOver();
+  } else if (game.screen === 'victory') {
+    drawVictory();
   }
 }
 
@@ -4898,6 +4962,346 @@ function drawPlayingScene() {
 
   // HUD drawn outside shake transform so it stays stable
   drawHUD();
+}
+
+// --- Victory Scene Functions ---
+
+function initVictoryScene() {
+  victoryTimer = 0;
+  victoryPiglets = [];
+  victoryVegans = [];
+  victoryAngels = [];
+  victoryIntruderTimer = 0;
+
+  // 12 piglet siblings
+  for (let i = 0; i < 12; i++) {
+    victoryPiglets.push({
+      x: 150 + Math.random() * 500,
+      y: HEIGHT - 120 + Math.random() * 40,
+      vx: (Math.random() - 0.5) * 60,
+      bouncePhase: Math.random() * Math.PI * 2,
+      size: 18 + Math.random() * 8
+    });
+  }
+  // Main piggy (bigger)
+  victoryPiglets.push({
+    x: WIDTH / 2,
+    y: HEIGHT - 130,
+    vx: 20,
+    bouncePhase: 0,
+    size: 32,
+    isMain: true
+  });
+
+  // 3 vegans
+  for (let i = 0; i < 3; i++) {
+    victoryVegans.push({
+      x: 200 + i * 200,
+      y: HEIGHT - 140,
+      dir: 1,
+      heartTimer: Math.random() * 2
+    });
+  }
+
+  // 4 armed angels on perimeter
+  victoryAngels.push({ x: 50, y: HEIGHT - 180, dir: 1, fireTimer: 3 + Math.random() * 5, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: WIDTH - 50, y: HEIGHT - 180, dir: -1, fireTimer: 5 + Math.random() * 5, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: 120, y: HEIGHT - 220, dir: 1, fireTimer: 7 + Math.random() * 4, firing: false, fireAnim: 0 });
+  victoryAngels.push({ x: WIDTH - 120, y: HEIGHT - 220, dir: -1, fireTimer: 2 + Math.random() * 6, firing: false, fireAnim: 0 });
+
+  playVictoryMusic();
+}
+
+function playVictoryMusic() {
+  if (!audioCtx) return;
+  const ctx2 = audioCtx;
+  const now = ctx2.currentTime;
+  // C major peaceful melody - idyllic farm feel
+  const melody = [
+    { freq: 523, dur: 0.45 }, // C5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 784, dur: 0.45 }, // G5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 523, dur: 0.45 }, // C5
+    { freq: 587, dur: 0.45 }, // D5
+    { freq: 659, dur: 0.45 }, // E5
+    { freq: 523, dur: 0.9 },  // C5 (held)
+  ];
+  let t = 0;
+  melody.forEach((note) => {
+    const osc = ctx2.createOscillator();
+    const gain = ctx2.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = note.freq;
+    gain.gain.setValueAtTime(0.08, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + t + note.dur - 0.05);
+    osc.connect(gain);
+    gain.connect(ctx2.destination);
+    osc.start(now + t);
+    osc.stop(now + t + note.dur);
+    t += note.dur;
+  });
+}
+
+function stopVictoryMusic() {
+  if (victoryMusicTimeout) {
+    clearTimeout(victoryMusicTimeout);
+    victoryMusicTimeout = null;
+  }
+}
+
+function playGunshotSound() {
+  if (!audioCtx) return;
+  const ctx2 = audioCtx;
+  const now = ctx2.currentTime;
+  // Sharp crack
+  const osc = ctx2.createOscillator();
+  const gain = ctx2.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+  gain.gain.setValueAtTime(0.3, now);
+  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+  osc.connect(gain);
+  gain.connect(ctx2.destination);
+  osc.start(now);
+  osc.stop(now + 0.2);
+}
+
+function drawVictory() {
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, HEIGHT * 0.6);
+  skyGrad.addColorStop(0, '#87CEEB');
+  skyGrad.addColorStop(1, '#E0F7FF');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // Sun (bigger, brighter)
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(WIDTH - 80, 70, 45, 0, Math.PI * 2);
+  ctx.fill();
+  // Sun rays (rotating)
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2 + victoryTimer / 3;
+    ctx.beginPath();
+    ctx.moveTo(WIDTH - 80 + Math.cos(angle) * 50, 70 + Math.sin(angle) * 50);
+    ctx.lineTo(WIDTH - 80 + Math.cos(angle) * 68, 70 + Math.sin(angle) * 68);
+    ctx.stroke();
+  }
+
+  // Clouds
+  for (const cloud of skyClouds) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.beginPath();
+    ctx.arc(cloud.x, cloud.y, cloud.w * 0.25, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.25, cloud.y - cloud.w * 0.12, cloud.w * 0.3, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.5, cloud.y, cloud.w * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Rolling green hills
+  ctx.fillStyle = '#4CAF50';
+  ctx.beginPath();
+  ctx.moveTo(0, HEIGHT * 0.55);
+  for (let x = 0; x <= WIDTH; x += 20) {
+    ctx.lineTo(x, HEIGHT * 0.55 + Math.sin(x / 100 + 1) * 20);
+  }
+  ctx.lineTo(WIDTH, HEIGHT);
+  ctx.lineTo(0, HEIGHT);
+  ctx.fill();
+
+  // Darker grass foreground
+  ctx.fillStyle = '#388E3C';
+  ctx.beginPath();
+  ctx.moveTo(0, HEIGHT * 0.7);
+  for (let x = 0; x <= WIDTH; x += 15) {
+    ctx.lineTo(x, HEIGHT * 0.7 + Math.sin(x / 80 + 2) * 10);
+  }
+  ctx.lineTo(WIDTH, HEIGHT);
+  ctx.lineTo(0, HEIGHT);
+  ctx.fill();
+
+  // Red American barn
+  ctx.fillStyle = '#B22222';
+  ctx.fillRect(WIDTH / 2 - 80, HEIGHT * 0.35, 160, 100);
+  // Roof
+  ctx.fillStyle = '#8B0000';
+  ctx.beginPath();
+  ctx.moveTo(WIDTH / 2 - 100, HEIGHT * 0.35);
+  ctx.lineTo(WIDTH / 2, HEIGHT * 0.25);
+  ctx.lineTo(WIDTH / 2 + 100, HEIGHT * 0.35);
+  ctx.fill();
+  // Barn door
+  ctx.fillStyle = '#5B1010';
+  ctx.fillRect(WIDTH / 2 - 20, HEIGHT * 0.35 + 40, 40, 60);
+  // White X on barn
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 10);
+  ctx.lineTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 90);
+  ctx.moveTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 10);
+  ctx.lineTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 90);
+  ctx.stroke();
+
+  // White picket fence
+  ctx.fillStyle = '#fff';
+  for (let x = 20; x < WIDTH - 20; x += 25) {
+    ctx.fillRect(x, HEIGHT - 85, 6, 30);
+    // Pointed top
+    ctx.beginPath();
+    ctx.moveTo(x, HEIGHT - 85);
+    ctx.lineTo(x + 3, HEIGHT - 92);
+    ctx.lineTo(x + 6, HEIGHT - 85);
+    ctx.fill();
+  }
+  // Horizontal rails
+  ctx.fillRect(10, HEIGHT - 75, WIDTH - 20, 4);
+  ctx.fillRect(10, HEIGHT - 62, WIDTH - 20, 4);
+
+  // Flowers
+  const flowerColors = ['#FF69B4', '#FF6347', '#FFD700', '#FF4500', '#DA70D6'];
+  for (let i = 0; i < 20; i++) {
+    const fx = 50 + (i * 37) % (WIDTH - 100);
+    const fy = HEIGHT - 50 + Math.sin(i * 1.7) * 10;
+    ctx.fillStyle = flowerColors[i % flowerColors.length];
+    ctx.beginPath();
+    ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#228B22';
+    ctx.fillRect(fx - 1, fy, 2, 8);
+  }
+
+  // Vegans petting piglets
+  for (const v of victoryVegans) {
+    ctx.font = '36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('\u{1F9D1}\u200D\u{1F33E}', v.x, v.y);
+    // Floating hearts
+    const heartY = v.y - 30 - (1.5 - v.heartTimer) * 20;
+    const heartAlpha = Math.max(0, v.heartTimer / 1.5);
+    ctx.globalAlpha = heartAlpha;
+    ctx.font = '16px sans-serif';
+    ctx.fillText('\u2764\uFE0F', v.x + 15, heartY);
+    ctx.globalAlpha = 1;
+  }
+
+  // Piglets bouncing and playing
+  for (const p of victoryPiglets) {
+    const bounce = Math.abs(Math.sin(p.bouncePhase)) * 15;
+    ctx.font = `${p.size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(p.isMain ? '\u{1F437}' : '\u{1F43D}', p.x, p.y - bounce);
+  }
+
+  // Armed angels on perimeter
+  for (const a of victoryAngels) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    if (a.dir < 0) ctx.scale(-1, 1);
+
+    // Angel emoji
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F607}', 0, 0);
+
+    // Ammo belt (brown diagonal stripe across chest)
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-12, -8);
+    ctx.lineTo(12, 8);
+    ctx.stroke();
+    // Ammo dots on belt
+    ctx.fillStyle = '#DAA520';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(-10 + i * 5, -6 + i * 3.2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Machine gun
+    ctx.fillStyle = '#333';
+    ctx.fillRect(15, -4, 25, 6);
+    ctx.fillRect(15, -7, 5, 10);
+
+    // Muzzle flash when firing
+    if (a.firing && a.fireAnim > 0.15) {
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.moveTo(40, -1);
+      ctx.lineTo(55, -8);
+      ctx.lineTo(50, -1);
+      ctx.lineTo(55, 6);
+      ctx.closePath();
+      ctx.fill();
+
+      // "BANG!" text
+      ctx.save();
+      if (a.dir < 0) ctx.scale(-1, 1);
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#ff0000';
+      ctx.textAlign = 'center';
+      ctx.fillText('BANG!', 50, -20);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // Title text
+  ctx.font = 'bold 52px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 4;
+  ctx.strokeText('SLOBODA! \u{1F437}', WIDTH / 2, 50);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('SLOBODA! \u{1F437}', WIDTH / 2, 50);
+
+  ctx.font = '22px sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  const sub = 'Kasica i njena bra\u0107a i sestre \u017eive sre\u0107no zauvek...';
+  ctx.strokeText(sub, WIDTH / 2, 85);
+  ctx.fillText(sub, WIDTH / 2, 85);
+
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillStyle = '#FFD700';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText('Final Score: ' + game.score, WIDTH / 2, 120);
+  ctx.fillText('Final Score: ' + game.score, WIDTH / 2, 120);
+
+  // Thank you message (fades in after 3 seconds)
+  if (victoryTimer > 3) {
+    ctx.globalAlpha = Math.min(1, (victoryTimer - 3) / 2);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ff6699';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.globalAlpha = 1;
+  }
+
+  // Click to continue hint (after 5 seconds)
+  if (victoryTimer > 5) {
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(victoryTimer * 3);
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeText('Klikni za nastavak', WIDTH / 2, HEIGHT - 15);
+    ctx.fillText('Klikni za nastavak', WIDTH / 2, HEIGHT - 15);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawLevelComplete() {
