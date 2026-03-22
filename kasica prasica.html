@@ -10,9 +10,11 @@
     background: #1a1a2e;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     min-height: 100vh;
     overflow: hidden;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
   }
   canvas {
     display: block;
@@ -171,11 +173,28 @@ canvas.width = WIDTH;
 canvas.height = HEIGHT;
 
 function resizeCanvas() {
-  const scaleX = window.innerWidth / WIDTH;
-  const scaleY = window.innerHeight / HEIGHT;
-  const scale = Math.min(scaleX, scaleY);
-  canvas.style.width = (WIDTH * scale) + 'px';
-  canvas.style.height = (HEIGHT * scale) + 'px';
+  const isMobile = 'ontouchstart' in window || window.innerWidth < 800;
+  const touchH = isMobile ? 110 : 0; // reserve space for touch controls at bottom
+  const availW = window.innerWidth;
+  const availH = window.innerHeight - touchH;
+
+  if (isMobile) {
+    // Mobile: fill available width, scale height proportionally
+    canvas.style.width = availW + 'px';
+    const proportionalH = availW * HEIGHT / WIDTH;
+    // If proportional height fits, use it; otherwise fill available height
+    if (proportionalH <= availH) {
+      canvas.style.height = proportionalH + 'px';
+    } else {
+      canvas.style.height = availH + 'px';
+      canvas.style.width = (availH * WIDTH / HEIGHT) + 'px';
+    }
+  } else {
+    // Desktop: fit within window preserving aspect ratio
+    const scale = Math.min(availW / WIDTH, availH / HEIGHT);
+    canvas.style.width = (WIDTH * scale) + 'px';
+    canvas.style.height = (HEIGHT * scale) + 'px';
+  }
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
