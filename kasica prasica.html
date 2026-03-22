@@ -4914,55 +4914,70 @@ function drawShop() {
   ctx.fillStyle = '#F7931A';
   ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin', WIDTH / 2, 80);
 
-  // Item cards
-  var cardW = 140;
-  var cardH = 160;
-  var startX = (WIDTH - SHOP_ITEMS.length * (cardW + 10)) / 2;
+  // Item cards - bigger on mobile for easier tapping
+  var cardW = isMobile ? 180 : 140;
+  var cardH = isMobile ? 210 : 160;
+  var cardGap = isMobile ? 15 : 10;
+  var startX = (WIDTH - SHOP_ITEMS.length * (cardW + cardGap)) / 2;
+  var cardY = isMobile ? 115 : 110;
 
   for (var i = 0; i < SHOP_ITEMS.length; i++) {
     var item = SHOP_ITEMS[i];
-    var x = startX + i * (cardW + 10);
-    var y = 110;
+    var x = startX + i * (cardW + cardGap);
+    var y = cardY;
     var canBuy = playerBTC >= item.cost;
 
     // Card background
     ctx.fillStyle = canBuy ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)';
-    ctx.fillRect(x, y, cardW, cardH);
+    ctx.beginPath();
+    ctx.roundRect(x, y, cardW, cardH, 10);
+    ctx.fill();
     ctx.strokeStyle = canBuy ? '#FFD700' : '#333';
     ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, cardW, cardH);
+    ctx.stroke();
 
     // Icon
-    ctx.font = '36px sans-serif';
+    ctx.font = `${isMobile ? 44 : 36}px sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(item.icon, x + cardW / 2, y + 40);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.icon, x + cardW / 2, y + (isMobile ? 45 : 40));
 
     // Name
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = `bold ${isMobile ? 16 : 13}px sans-serif`;
     ctx.fillStyle = canBuy ? '#fff' : '#555';
-    ctx.fillText(item.name, x + cardW / 2, y + 65);
+    ctx.fillText(item.name, x + cardW / 2, y + (isMobile ? 80 : 65));
 
     // Description
-    ctx.font = '11px sans-serif';
+    ctx.font = `${isMobile ? 13 : 11}px sans-serif`;
     ctx.fillStyle = canBuy ? '#aaa' : '#444';
-    ctx.fillText(item.desc, x + cardW / 2, y + 82);
+    ctx.fillText(item.desc, x + cardW / 2, y + (isMobile ? 100 : 82));
 
     // Price
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = `bold ${isMobile ? 20 : 16}px sans-serif`;
     ctx.fillStyle = canBuy ? '#F7931A' : '#553300';
-    ctx.fillText('\u20BF ' + item.cost, x + cardW / 2, y + 110);
+    ctx.fillText('\u20BF ' + item.cost, x + cardW / 2, y + (isMobile ? 130 : 110));
 
-    // Buy button
+    // Buy button - much bigger on mobile
+    var buyBtnH = isMobile ? 45 : 28;
+    var buyBtnY = y + (isMobile ? 150 : 125);
+    var buyBtnX = x + (isMobile ? 10 : 20);
+    var buyBtnW = cardW - (isMobile ? 20 : 40);
     if (canBuy) {
       ctx.fillStyle = '#F7931A';
-      ctx.fillRect(x + 20, y + 125, cardW - 40, 28);
+      ctx.beginPath();
+      ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
+      ctx.fill();
       ctx.fillStyle = '#000';
-      ctx.font = 'bold 13px sans-serif';
-      ctx.fillText('KUPI', x + cardW / 2, y + 143);
+      ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
+      ctx.fillText('KUPI', x + cardW / 2, buyBtnY + buyBtnH / 2);
     }
 
-    // Store rect for click detection
-    item._rect = { x: x + 20, y: y + 125, w: cardW - 40, h: 28 };
+    // Store rect for click detection - entire card is tappable on mobile
+    if (isMobile) {
+      item._rect = { x: x, y: y, w: cardW, h: cardH };
+    } else {
+      item._rect = { x: buyBtnX, y: buyBtnY, w: buyBtnW, h: buyBtnH };
+    }
   }
 
   // Skip button - BIG TAP BUTTON for mobile
@@ -5022,8 +5037,8 @@ function handleShopClick(e) {
   if (shopSkipRect) {
     var sr = shopSkipRect;
     var hitSkip = (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h);
-    // On mobile: also allow tap on bottom 30% of screen as skip
-    if (isMobile && clickY > HEIGHT * 0.7) hitSkip = true;
+    // On mobile: tap below cards area (y > 340) also works as skip
+    if (isMobile && clickY > 340) hitSkip = true;
     if (hitSkip) {
       game.level++;
       startLevel();
