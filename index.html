@@ -24,58 +24,69 @@
     display: none;
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    height: 140px;
+    height: 100px;
     pointer-events: none;
     z-index: 100;
   }
-  #touchControls.visible { display: flex; justify-content: space-between; align-items: flex-end; padding: 10px 15px; }
+  #touchControls.visible {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 8px;
+  }
   .touch-btn {
     pointer-events: auto;
-    width: 64px; height: 64px;
+    width: 68px; height: 68px;
     border-radius: 50%;
     border: 3px solid rgba(255,255,255,0.5);
     background: rgba(255,255,255,0.15);
     color: white;
-    font-size: 28px;
+    font-size: 30px;
     display: flex; align-items: center; justify-content: center;
     user-select: none;
     -webkit-user-select: none;
-    transition: background 0.1s;
+    transition: background 0.08s, transform 0.08s;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
   }
   .touch-btn.active {
     background: rgba(255,255,255,0.4);
     border-color: rgba(255,255,255,0.9);
-    transform: scale(0.92);
+    transform: scale(0.90);
   }
-  .dpad { display: flex; gap: 6px; align-items: center; }
-  .dpad-col { display: flex; flex-direction: column; gap: 6px; }
-  .actions { display: flex; gap: 8px; align-items: flex-end; }
-  .actions .touch-btn.fart-btn {
-    width: 72px; height: 72px;
-    font-size: 32px;
+  .touch-btn.fart-btn {
+    width: 74px; height: 74px;
+    font-size: 34px;
     background: rgba(100,200,50,0.25);
     border-color: rgba(100,200,50,0.6);
+  }
+  .touch-btn.fart-btn.active {
+    background: rgba(100,200,50,0.5);
+    border-color: rgba(100,200,50,0.9);
+  }
+  .shake-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .shake-col .touch-btn {
+    width: 58px; height: 58px;
+    font-size: 24px;
   }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
 
-<!-- Mobile virtual gamepad -->
+<!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
-  <div class="dpad">
-    <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
-    <div class="dpad-col">
-      <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
-      <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
-    </div>
-    <div class="touch-btn" id="btnRight" data-key="ArrowRight">&#9654;</div>
+  <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
+  <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
+  <div class="shake-col">
+    <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
+    <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
   </div>
-  <div class="actions">
-    <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
-  </div>
+  <div class="touch-btn" id="btnRight" data-key="ArrowRight">&#9654;</div>
 </div>
 
 <script>
