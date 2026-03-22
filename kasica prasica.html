@@ -224,7 +224,13 @@ const player = {
   speed: 300,
   emoji: '\u{1F437}',
   facing: 0,
-  facingSmooth: 0
+  facingSmooth: 0,
+  vy: 0,
+  grounded: true,
+  groundY: HEIGHT - 70,
+  jumpForce: -600,
+  gravity: 1200,
+  slamGravity: 3600
 };
 
 // --- Falling Objects ---
@@ -1732,6 +1738,9 @@ function startLevel() {
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
+  player.y = player.groundY;
+  player.vy = 0;
+  player.grounded = true;
   player.facing = 0;
   player.facingSmooth = 0;
 
@@ -1746,6 +1755,12 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   keys[e.key] = true;
+
+  // Jump (only when grounded and no latched devil)
+  if (e.key === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
+    player.vy = player.jumpForce;
+    player.grounded = false;
+  }
 
   // Shake detection when devil is latched
   if (game.latchedDevil && game.screen === 'playing') {
@@ -1884,6 +1899,12 @@ function simulateKeyDown(keyName) {
   const fakeEvent = { key: keyName, preventDefault: () => {} };
   // Set key state
   keys[keyName] = true;
+
+  // Jump (only when grounded and no latched devil) - touch controls
+  if (keyName === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
+    player.vy = player.jumpForce;
+    player.grounded = false;
+  }
 
   // Handle shake detection for latched devil
   if (game.latchedDevil && game.screen === 'playing') {
@@ -2154,6 +2175,20 @@ function update(dt) {
   const halfW = player.width / 2;
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
+
+  // Jump physics
+  if (!player.grounded) {
+    const grav = keys['ArrowDown'] ? player.slamGravity : player.gravity;
+    player.vy += grav * dt;
+    player.y += player.vy * dt;
+    if (player.y >= player.groundY) {
+      player.y = player.groundY;
+      player.vy = 0;
+      player.grounded = true;
+    }
+  } else {
+    player.y = player.groundY;
+  }
 
   // Spawn timer
   const spawnRate = game.levelConfig ? game.levelConfig.spawnRate : 1.0;
@@ -2609,20 +2644,23 @@ function drawPiggySprite(x, y, facing, state) {
   ctx.fillRect(-6, -21, 12, 1);
 
   // LEGS (2 front, 2 back - offset for depth)
+  // Tuck legs when airborne (60% height)
+  const legH = player.grounded ? 12 : 7;
+  const legOff = player.grounded ? 0 : 2; // pull up slightly when airborne
   ctx.fillStyle = '#FF9CAD';
   // Back legs (slightly behind)
-  ctx.fillRect(-15, 12, 7, 12);
-  ctx.fillRect(8, 12, 7, 12);
+  ctx.fillRect(-15, 12 + legOff, 7, legH);
+  ctx.fillRect(8, 12 + legOff, 7, legH);
   // Front legs (slightly in front, darker)
   ctx.fillStyle = bodyDark;
-  ctx.fillRect(-18, 14, 7, 12);
-  ctx.fillRect(11, 14, 7, 12);
+  ctx.fillRect(-18, 14 + legOff, 7, legH);
+  ctx.fillRect(11, 14 + legOff, 7, legH);
   // Hooves
   ctx.fillStyle = '#8B4513';
-  ctx.fillRect(-18, 24, 7, 3);
-  ctx.fillRect(11, 24, 7, 3);
-  ctx.fillRect(-15, 22, 7, 3);
-  ctx.fillRect(8, 22, 7, 3);
+  ctx.fillRect(-18, 14 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(11, 14 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(-15, 12 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(8, 12 + legOff + legH - 1, 7, 3);
 
   // TAIL (curly!) - at the back
   ctx.strokeStyle = '#FF9CAD';
