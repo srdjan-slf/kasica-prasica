@@ -172,56 +172,56 @@ function getLevelConfig(level) {
 
   if (level === 1) {
     duration = 30;
-    fallSpeed = 220;
-    spawnRate = 0.5;
+    fallSpeed = 154;
+    spawnRate = 0.65;
     devilCount = 5;
     bombChance = 0.12;
     billChance = 0.10;
     goldChance = 0.03;
   } else if (level === 2) {
     duration = 35;
-    fallSpeed = 270;
-    spawnRate = 0.4;
+    fallSpeed = 189;
+    spawnRate = 0.52;
     devilCount = 8;
     bombChance = 0.18;
     billChance = 0.15;
     goldChance = 0.05;
   } else if (level === 3) {
     duration = 35;
-    fallSpeed = 320;
-    spawnRate = 0.35;
+    fallSpeed = 224;
+    spawnRate = 0.455;
     devilCount = 12;
     bombChance = 0.22;
     billChance = 0.20;
     goldChance = 0.07;
   } else if (level === 4) {
     duration = 40;
-    fallSpeed = 370;
-    spawnRate = 0.28;
+    fallSpeed = 259;
+    spawnRate = 0.364;
     devilCount = 16;
     bombChance = 0.28;
     billChance = 0.20;
     goldChance = 0.08;
   } else if (level === 5) {
     duration = 40;
-    fallSpeed = 420;
-    spawnRate = 0.22;
+    fallSpeed = 294;
+    spawnRate = 0.286;
     devilCount = 20;
     bombChance = 0.32;
     billChance = 0.25;
     goldChance = 0.10;
   } else if (level === 6) {
     duration = 45;
-    fallSpeed = 470;
-    spawnRate = 0.18;
+    fallSpeed = 329;
+    spawnRate = 0.234;
     devilCount = 25;
     bombChance = 0.35;
     billChance = 0.25;
     goldChance = 0.10;
   } else if (level === 7) {
     duration = 45;
-    fallSpeed = 520;
-    spawnRate = 0.15;
+    fallSpeed = 364;
+    spawnRate = 0.195;
     devilCount = 30;
     bombChance = 0.38;
     billChance = 0.25;
@@ -229,8 +229,8 @@ function getLevelConfig(level) {
   } else {
     // Level 8+: ABSOLUTE CHAOS
     duration = 40 + level * 3;
-    fallSpeed = 480 + level * 35;
-    spawnRate = Math.max(0.10, 0.15 - (level - 7) * 0.01);
+    fallSpeed = (480 + level * 35) * 0.7;
+    spawnRate = Math.max(0.13, 0.195 - (level - 7) * 0.013);
     devilCount = 25 + level * 3;
     bombChance = Math.min(0.50, 0.35 + (level - 7) * 0.03);
     billChance = 0.25;
@@ -319,10 +319,10 @@ const groundEnemies = [];
 let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
-  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 350, ai: 'straight', fromLevel: 3, size: 44 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 200, ai: 'chase', fromLevel: 4, size: 40 },
-  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 280, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 150, ai: 'relentless', fromLevel: 6, size: 42 }
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 175, ai: 'straight', fromLevel: 3, size: 64 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 140, ai: 'chase', fromLevel: 4, size: 40 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 196, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 105, ai: 'relentless', fromLevel: 6, size: 42 }
 };
 
 // --- Shake Mechanic ---
@@ -1619,7 +1619,7 @@ function spawnObject() {
       y: -size / 2,
       width: size,
       height: size,
-      speed: fallSpeed * 1.6,
+      speed: fallSpeed * 1.3,
       emoji: '\u{1F4A3}',
       value: 0
     });
@@ -2954,7 +2954,7 @@ function update(dt) {
     if (lightningSpawnTimer <= 0 && !lightningWarning) {
       lightningSpawnTimer = 5 + Math.random() * 3;
       const cloud = skyClouds[Math.floor(Math.random() * skyClouds.length)];
-      lightningWarning = { x: cloud.x + cloud.w * 0.25, y: cloud.y + 20, timer: 1.0 };
+      lightningWarning = { x: cloud.x + cloud.w * 0.25, y: cloud.y + 20, timer: 1.5 };
     }
 
     if (lightningWarning) {
@@ -2966,7 +2966,7 @@ function update(dt) {
           bottomY: lightningWarning.y,
           width: 20,
           height: 30,
-          speed: 800,
+          speed: 560,
           segments: generateLightningSegments(lightningWarning.x, lightningWarning.y, HEIGHT - 30),
           life: 0.3,
           flash: 1.0
