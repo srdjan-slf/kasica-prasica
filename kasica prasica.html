@@ -4421,6 +4421,36 @@ function drawPlayingScene() {
     }
   }
 
+  // Lightning warning (pulsing yellow glow on cloud) - draw behind ground elements
+  if (lightningWarning) {
+    const pulse = Math.sin(Date.now() / 80) * 0.3 + 0.5;
+    ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
+    ctx.beginPath();
+    ctx.arc(lightningWarning.x, lightningWarning.y - 10, 25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw poops with stink waves (behind enemies)
+  for (const poop of poops) {
+    ctx.save();
+    ctx.font = '28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
+    // Green stink waves rising
+    const alpha = poop.life / POOP_DURATION;
+    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const ox = Math.sin(poop.stinkTimer * 2 + i * 2) * 10;
+      ctx.moveTo(poop.x - 15 + ox, poop.y - 10 - i * 12);
+      ctx.quadraticCurveTo(poop.x + ox, poop.y - 20 - i * 12, poop.x + 15 + ox, poop.y - 10 - i * 12);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // Ground enemies
   for (const e of groundEnemies) {
     ctx.save();
@@ -4467,83 +4497,6 @@ function drawPlayingScene() {
     ctx.fillStyle = vegan.hp > 1 ? '#4CAF50' : '#ff4444';
     ctx.fillRect(-15, -40, 30 * (vegan.hp / vegan.maxHp), 5);
 
-    ctx.restore();
-  }
-
-  // Draw vegan death animation
-  if (veganDeathAnim) {
-    const da = veganDeathAnim;
-    ctx.save();
-    ctx.globalAlpha = da.opacity;
-    ctx.translate(da.x, da.y);
-
-    // Halo
-    if (da.haloSize > 0) {
-      ctx.strokeStyle = '#FFD700';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.ellipse(0, -35, 15 * da.haloSize, 5 * da.haloSize, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Angel wings
-    if (da.wingSpread > 0) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      // Left wing
-      ctx.beginPath();
-      ctx.moveTo(-5, -10);
-      ctx.quadraticCurveTo(-30 * da.wingSpread, -30, -40 * da.wingSpread, -5);
-      ctx.quadraticCurveTo(-25 * da.wingSpread, 0, -5, 5);
-      ctx.fill();
-      // Right wing
-      ctx.beginPath();
-      ctx.moveTo(5, -10);
-      ctx.quadraticCurveTo(30 * da.wingSpread, -30, 40 * da.wingSpread, -5);
-      ctx.quadraticCurveTo(25 * da.wingSpread, 0, 5, 5);
-      ctx.fill();
-    }
-
-    // Vegan emoji rising
-    ctx.font = '40px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('\u{1F607}', 0, 0);
-
-    ctx.restore();
-
-    // Message text
-    if (da.timer > 1.0) {
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, (da.timer - 1) / 1.0);
-      ctx.font = 'bold 24px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 3;
-      ctx.strokeText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
-      ctx.fillStyle = '#ff4444';
-      ctx.fillText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
-      ctx.restore();
-    }
-  }
-
-  // Draw poops with stink waves
-  for (const poop of poops) {
-    ctx.save();
-    ctx.font = '28px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
-    // Green stink waves rising
-    const alpha = poop.life / POOP_DURATION;
-    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      const ox = Math.sin(poop.stinkTimer * 2 + i * 2) * 10;
-      ctx.moveTo(poop.x - 15 + ox, poop.y - 10 - i * 12);
-      ctx.quadraticCurveTo(poop.x + ox, poop.y - 20 - i * 12, poop.x + 15 + ox, poop.y - 10 - i * 12);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -4720,15 +4673,6 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
-  // Lightning warning (pulsing yellow glow on cloud)
-  if (lightningWarning) {
-    const pulse = Math.sin(Date.now() / 80) * 0.3 + 0.5;
-    ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
-    ctx.beginPath();
-    ctx.arc(lightningWarning.x, lightningWarning.y - 10, 25, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   // Lightning bolts
   for (const bolt of lightningBolts) {
     // Screen flash
@@ -4764,6 +4708,62 @@ function drawPlayingScene() {
 
   // Score pop-ups
   drawScorePopups();
+
+  // Draw vegan death animation (on top of everything except UI)
+  if (veganDeathAnim) {
+    const da = veganDeathAnim;
+    ctx.save();
+    ctx.globalAlpha = da.opacity;
+    ctx.translate(da.x, da.y);
+
+    // Halo
+    if (da.haloSize > 0) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, -35, 15 * da.haloSize, 5 * da.haloSize, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Angel wings
+    if (da.wingSpread > 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-5, -10);
+      ctx.quadraticCurveTo(-30 * da.wingSpread, -30, -40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(-25 * da.wingSpread, 0, -5, 5);
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(5, -10);
+      ctx.quadraticCurveTo(30 * da.wingSpread, -30, 40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(25 * da.wingSpread, 0, 5, 5);
+      ctx.fill();
+    }
+
+    // Vegan emoji rising
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F607}', 0, 0);
+
+    ctx.restore();
+
+    // Message text
+    if (da.timer > 1.0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (da.timer - 1) / 1.0);
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.strokeText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.restore();
+    }
+  }
 
   // Success flash (green)
   if (successFlashTimer > 0) {

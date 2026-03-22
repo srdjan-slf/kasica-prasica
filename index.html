@@ -73,6 +73,16 @@
     width: 58px; height: 58px;
     font-size: 24px;
   }
+  .touch-btn.poop-btn {
+    width: 60px; height: 60px;
+    font-size: 28px;
+    background: rgba(136, 102, 0, 0.25);
+    border-color: rgba(136, 102, 0, 0.6);
+  }
+  .touch-btn.poop-btn.active {
+    background: rgba(136, 102, 0, 0.5);
+    border-color: rgba(136, 102, 0, 0.9);
+  }
 </style>
 </head>
 <body>
@@ -82,6 +92,7 @@
 <div id="touchControls">
   <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
   <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
+  <div class="touch-btn poop-btn" id="btnPoop" data-key="Poop">&#128169;</div>
   <div class="shake-col">
     <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
@@ -224,7 +235,13 @@ const player = {
   speed: 300,
   emoji: '\u{1F437}',
   facing: 0,
-  facingSmooth: 0
+  facingSmooth: 0,
+  vy: 0,
+  grounded: true,
+  groundY: HEIGHT - 70,
+  jumpForce: -600,
+  gravity: 1200,
+  slamGravity: 3600
 };
 
 // --- Falling Objects ---
@@ -232,6 +249,17 @@ const objects = [];
 let spawnTimer = 0;
 let flashTimer = 0;
 let flashColor = '#ff0000';
+
+// --- Ground Enemies ---
+const groundEnemies = [];
+let groundEnemySpawnTimer = 0;
+
+const GROUND_ENEMY_TYPES = {
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 350, ai: 'straight', fromLevel: 3, size: 44 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 200, ai: 'chase', fromLevel: 4, size: 40 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 280, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 150, ai: 'relentless', fromLevel: 6, size: 42 }
+};
 
 // --- Shake Mechanic ---
 let lastShakeKey = null;
@@ -249,6 +277,18 @@ const MAX_FARTS = 5;
 const fartClouds = [];         // active fart clouds flying upward
 let fartCooldown = 0;          // prevent spam (0.5s cooldown)
 const chokingDevils = [];      // devils that got farted on (dying animation)
+
+// --- Poop Mechanic ---
+const poops = [];
+let poopCooldown = 0;
+const POOP_COOLDOWN = 8;
+const POOP_DURATION = 10;
+let isPooping = false;
+let poopAnimTimer = 0;
+
+// --- Vegan Ally ---
+let vegan = null;
+let veganDeathAnim = null;
 
 // --- Particle System ---
 const particles = [];
@@ -361,18 +401,42 @@ function drawScorePopups() {
   ctx.lineWidth = 1;
 }
 
-// --- Background Clouds ---
-const clouds = [
-  { x: 100, y: 60, speed: 12, size: 36 },
-  { x: 350, y: 100, speed: 18, size: 42 },
-  { x: 600, y: 40, speed: 10, size: 32 },
-  { x: 200, y: 130, speed: 15, size: 38 }
-];
+// --- Sky & Weather ---
+const skyClouds = [];
+for (let i = 0; i < 5; i++) {
+  skyClouds.push({
+    x: Math.random() * WIDTH,
+    y: 30 + Math.random() * 80,
+    w: 80 + Math.random() * 60,
+    speed: 10 + Math.random() * 20,
+    opacity: 0.5 + Math.random() * 0.3
+  });
+}
+
+// --- Lightning ---
+const lightningBolts = [];
+let lightningWarning = null;
+let lightningSpawnTimer = 5;
+
+function generateLightningSegments(startX, startY, endY) {
+  const segments = [];
+  let x = startX;
+  let y = startY;
+  const step = 30;
+  while (y < endY) {
+    const nextX = x + (Math.random() - 0.5) * 40;
+    const nextY = Math.min(y + step, endY);
+    segments.push({ x1: x, y1: y, x2: nextX, y2: nextY });
+    x = nextX;
+    y = nextY;
+  }
+  return segments;
+}
 
 function updateClouds(dt) {
-  for (const c of clouds) {
-    c.x += c.speed * dt;
-    if (c.x > WIDTH + 50) c.x = -50;
+  for (const cloud of skyClouds) {
+    cloud.x += cloud.speed * dt;
+    if (cloud.x > WIDTH + cloud.w) cloud.x = -cloud.w;
   }
 }
 
@@ -1142,6 +1206,38 @@ function playChokingSound() {
   } catch(e) {}
 }
 
+function playPoopSound() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+    // Low squelchy sound
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+
+    // Add a "plop" noise
+    const noise = ctx.createOscillator();
+    const noiseGain = ctx.createGain();
+    noise.type = 'sine';
+    noise.frequency.setValueAtTime(150, t + 0.1);
+    noise.frequency.exponentialRampToValueAtTime(60, t + 0.25);
+    noiseGain.gain.setValueAtTime(0.2, t + 0.1);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+    noise.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(t + 0.1);
+    noise.stop(t + 0.3);
+  } catch(e) {}
+}
+
 // --- Background Music System ---
 let musicPlaying = false;
 let musicNodes = null;
@@ -1729,9 +1825,35 @@ function startLevel() {
   shakeVisualTimer = 0;
   screenShake.intensity = 0;
   screenShake.duration = 0;
+  lightningBolts.length = 0;
+  lightningWarning = null;
+  lightningSpawnTimer = 5;
+  groundEnemies.length = 0;
+  groundEnemySpawnTimer = 3;
+  poops.length = 0;
+  poopCooldown = 0;
+  isPooping = false;
+  poopAnimTimer = 0;
+  vegan = null;
+  veganDeathAnim = null;
+  if (game.level >= 2 && Math.random() < 0.10) {
+    vegan = {
+      x: WIDTH / 2 + (Math.random() - 0.5) * 200,
+      y: HEIGHT - 50,
+      width: 40, height: 50,
+      hp: 3, maxHp: 3,
+      dir: 1, speed: 80,
+      state: 'patrol',
+      blockTimer: 0,
+      auraTimer: 0
+    };
+  }
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
+  player.y = player.groundY;
+  player.vy = 0;
+  player.grounded = true;
   player.facing = 0;
   player.facingSmooth = 0;
 
@@ -1746,6 +1868,12 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   keys[e.key] = true;
+
+  // Jump (only when grounded and no latched devil)
+  if (e.key === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
+    player.vy = player.jumpForce;
+    player.grounded = false;
+  }
 
   // Shake detection when devil is latched
   if (game.latchedDevil && game.screen === 'playing') {
@@ -1884,6 +2012,12 @@ function simulateKeyDown(keyName) {
   const fakeEvent = { key: keyName, preventDefault: () => {} };
   // Set key state
   keys[keyName] = true;
+
+  // Jump (only when grounded and no latched devil) - touch controls
+  if (keyName === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
+    player.vy = player.jumpForce;
+    player.grounded = false;
+  }
 
   // Handle shake detection for latched devil
   if (game.latchedDevil && game.screen === 'playing') {
@@ -2155,6 +2289,20 @@ function update(dt) {
   if (player.x < halfW) player.x = halfW;
   if (player.x > WIDTH - halfW) player.x = WIDTH - halfW;
 
+  // Jump physics
+  if (!player.grounded) {
+    const grav = keys['ArrowDown'] ? player.slamGravity : player.gravity;
+    player.vy += grav * dt;
+    player.y += player.vy * dt;
+    if (player.y >= player.groundY) {
+      player.y = player.groundY;
+      player.vy = 0;
+      player.grounded = true;
+    }
+  } else {
+    player.y = player.groundY;
+  }
+
   // Spawn timer
   const spawnRate = game.levelConfig ? game.levelConfig.spawnRate : 1.0;
   spawnTimer += dt;
@@ -2184,6 +2332,32 @@ function update(dt) {
 
   // Update fart cooldown
   if (fartCooldown > 0) fartCooldown -= dt;
+
+  // Poop: both LEFT and RIGHT held simultaneously while grounded (or mobile Poop button)
+  if ((keys['ArrowLeft'] && keys['ArrowRight'] || keys['Poop']) && player.grounded && poopCooldown <= 0 && !isPooping) {
+    isPooping = true;
+    poopAnimTimer = 0.6;
+  }
+
+  if (isPooping) {
+    poopAnimTimer -= dt;
+    if (poopAnimTimer <= 0) {
+      isPooping = false;
+      poopCooldown = POOP_COOLDOWN;
+      poops.push({
+        x: player.x,
+        y: HEIGHT - 35,
+        width: 30,
+        height: 25,
+        life: POOP_DURATION,
+        stinkTimer: 0
+      });
+      playPoopSound();
+      spawnParticles(player.x, HEIGHT - 35, '\u{1F4A9}', 3, 50);
+      triggerScreenShake(4, 0.2);
+    }
+  }
+  poopCooldown = Math.max(0, poopCooldown - dt);
 
   // Update fart clouds
   for (let i = fartClouds.length - 1; i >= 0; i--) {
@@ -2526,6 +2700,260 @@ function update(dt) {
       objects.splice(i, 1);
     }
   }
+
+  // --- Lightning System (Level 4+) ---
+  if (game.level >= 4) {
+    lightningSpawnTimer -= dt;
+    if (lightningSpawnTimer <= 0 && !lightningWarning) {
+      lightningSpawnTimer = 5 + Math.random() * 3;
+      const cloud = skyClouds[Math.floor(Math.random() * skyClouds.length)];
+      lightningWarning = { x: cloud.x + cloud.w * 0.25, y: cloud.y + 20, timer: 1.0 };
+    }
+
+    if (lightningWarning) {
+      lightningWarning.timer -= dt;
+      if (lightningWarning.timer <= 0) {
+        lightningBolts.push({
+          x: lightningWarning.x,
+          y: lightningWarning.y,
+          bottomY: lightningWarning.y,
+          width: 20,
+          height: 30,
+          speed: 800,
+          segments: generateLightningSegments(lightningWarning.x, lightningWarning.y, HEIGHT - 30),
+          life: 0.3,
+          flash: 1.0
+        });
+        lightningWarning = null;
+        triggerScreenShake(5, 0.2);
+      }
+    }
+
+    // Update lightning bolts
+    for (let i = lightningBolts.length - 1; i >= 0; i--) {
+      const bolt = lightningBolts[i];
+      bolt.life -= dt;
+      bolt.flash -= dt * 3;
+
+      // Collision with player (check if any segment is near player)
+      if (bolt.life > 0.15) { // Only damage on initial strike
+        const boltHitbox = { x: bolt.x, y: HEIGHT - 50, width: 30, height: 60 };
+        if (aabb(player, boltHitbox)) {
+          triggerDamage(true);
+          bolt.life = 0.1; // Prevent double damage
+        }
+      }
+
+      if (bolt.life <= 0) lightningBolts.splice(i, 1);
+    }
+  }
+
+  // --- Ground Enemies ---
+  if (game.level >= 3) {
+    groundEnemySpawnTimer -= dt;
+    if (groundEnemySpawnTimer <= 0) {
+      groundEnemySpawnTimer = Math.max(1.5, 4 - game.level * 0.3);
+      const available = Object.entries(GROUND_ENEMY_TYPES)
+        .filter(([_, t]) => game.level >= t.fromLevel);
+      const [key, type] = available[Math.floor(Math.random() * available.length)];
+      const fromLeft = Math.random() > 0.5;
+      groundEnemies.push({
+        type: key,
+        emoji: type.emoji,
+        x: fromLeft ? -30 : WIDTH + 30,
+        y: HEIGHT - 45,
+        width: type.size,
+        height: type.size,
+        speed: type.speed,
+        dir: fromLeft ? 1 : -1,
+        ai: type.ai,
+        pauseTimer: 0,
+        animTimer: 0
+      });
+    }
+  }
+
+  for (let i = groundEnemies.length - 1; i >= 0; i--) {
+    const e = groundEnemies[i];
+    e.animTimer += dt;
+
+    switch (e.ai) {
+      case 'straight':
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'chase':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'cunning':
+        if (e.pauseTimer > 0) {
+          e.pauseTimer -= dt;
+        } else {
+          e.x += e.speed * e.dir * dt;
+          if (Math.random() < 0.005) {
+            e.pauseTimer = 0.3 + Math.random() * 0.5;
+            e.dir *= -1;
+          }
+        }
+        break;
+      case 'relentless':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+    }
+
+    // Remove if off-screen (only for straight runners, others stay)
+    if (e.ai === 'straight' && (e.x < -80 || e.x > WIDTH + 80)) {
+      groundEnemies.splice(i, 1);
+      continue;
+    }
+    // Clamp chase/relentless/cunning enemies to screen bounds
+    if (e.ai !== 'straight') {
+      e.x = Math.max(-20, Math.min(WIDTH + 20, e.x));
+    }
+
+    // Collision with player - ONLY if player is on or near ground level
+    // (player can jump OVER them)
+    if (player.grounded && aabb(player, e)) {
+      triggerDamage(false);
+      groundEnemies.splice(i, 1);
+      spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
+    }
+  }
+
+  // Update poops and check collision with ground enemies
+  for (let p = poops.length - 1; p >= 0; p--) {
+    const poop = poops[p];
+    poop.life -= dt;
+    poop.stinkTimer += dt;
+    if (poop.life <= 0) { poops.splice(p, 1); continue; }
+
+    for (let e = groundEnemies.length - 1; e >= 0; e--) {
+      if (aabb(poop, groundEnemies[e])) {
+        const enemy = groundEnemies[e];
+        chokingDevils.push({
+          emoji: enemy.emoji,
+          x: enemy.x, y: enemy.y,
+          width: enemy.width,
+          timer: 2.0, coughTimer: 0,
+          opacity: 1.0, greenTint: 1.0
+        });
+        groundEnemies.splice(e, 1);
+        playChokingSound();
+        spawnParticles(enemy.x, enemy.y, '\u{1F922}', 4, 100);
+        spawnParticles(enemy.x, enemy.y, '\u{1F4A9}', 2, 60);
+        spawnScorePopup(enemy.x, enemy.y, '\u{1F480}\u{1F4A9}', '#885500');
+      }
+    }
+  }
+
+  // --- Vegan Ally Update ---
+  if (vegan && vegan.state !== 'dead') {
+    vegan.auraTimer += dt;
+
+    // Find nearest meat-eating threat near player
+    let nearestThreat = null;
+    let nearestDist = 200;
+    for (const e of groundEnemies) {
+      if (e.type === 'carnivore' || e.type === 'farmer') {
+        const dist = Math.abs(e.x - player.x);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestThreat = e;
+        }
+      }
+    }
+
+    if (nearestThreat) {
+      vegan.state = 'defend';
+      vegan.dir = nearestThreat.x > vegan.x ? 1 : -1;
+      vegan.x += vegan.speed * 2 * vegan.dir * dt;
+      if (Math.abs(vegan.x - nearestThreat.x) < 30) {
+        vegan.blockTimer -= dt;
+        if (vegan.blockTimer <= 0) {
+          vegan.hp--;
+          vegan.blockTimer = 1.5;
+          spawnParticles(vegan.x, vegan.y, '✌️', 3, 80);
+          const idx = groundEnemies.indexOf(nearestThreat);
+          if (idx >= 0) groundEnemies.splice(idx, 1);
+          if (vegan.hp <= 0) killVegan('enemy');
+        }
+      }
+    } else {
+      vegan.state = 'patrol';
+      const targetX = player.x + Math.sin(Date.now() / 1000) * 100;
+      vegan.dir = targetX > vegan.x ? 1 : -1;
+      vegan.x += vegan.speed * vegan.dir * dt;
+    }
+
+    if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
+
+    // Poop collision - kills vegan!
+    for (const poop of poops) {
+      if (vegan && aabb(vegan, poop)) {
+        killVegan('poop');
+        break;
+      }
+    }
+
+    // Bomb/devil collision from falling objects
+    for (let i = objects.length - 1; i >= 0; i--) {
+      const obj = objects[i];
+      if (vegan && (obj.type === 'bomb' || obj.type === 'devil') && aabb(vegan, obj)) {
+        killVegan(obj.type === 'bomb' ? 'bomb' : 'devil');
+        objects.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  // Vegan death animation update
+  if (veganDeathAnim) {
+    veganDeathAnim.timer -= dt;
+    veganDeathAnim.y -= 40 * dt;
+    veganDeathAnim.wingSpread = Math.min(1, veganDeathAnim.wingSpread + dt * 2);
+    veganDeathAnim.haloSize = Math.min(1, veganDeathAnim.haloSize + dt * 1.5);
+    veganDeathAnim.opacity = Math.max(0, veganDeathAnim.timer / 2.0);
+    if (veganDeathAnim.timer <= 0) veganDeathAnim = null;
+  }
+}
+
+function killVegan(cause) {
+  if (!vegan) return;
+  const msg = cause === 'poop'
+    ? 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}'
+    : 'O ne, ubio si vegana! \u{1F607}';
+  veganDeathAnim = {
+    x: vegan.x, y: vegan.y,
+    timer: 4.0,
+    msg: msg,
+    wingSpread: 0,
+    haloSize: 0,
+    opacity: 1.0
+  };
+  vegan = null;
+  playVeganDeathSound();
+  spawnParticles(veganDeathAnim.x, veganDeathAnim.y, '\u{1F607}', 5, 100);
+}
+
+function playVeganDeathSound() {
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+    // Sad minor chord progression
+    [261, 311, 370].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, now + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 2.0 + i * 0.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.2);
+      osc.stop(now + 2.5);
+    });
+  } catch(e) {}
 }
 
 // --- Draw ---
@@ -2537,15 +2965,30 @@ function drawBackground() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Draw clouds
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const c of clouds) {
-    ctx.globalAlpha = 0.6;
-    ctx.font = c.size + 'px sans-serif';
-    ctx.fillText('\u2601\uFE0F', c.x, c.y);
+  // Draw fluffy clouds (3 overlapping circles each)
+  for (const cloud of skyClouds) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`;
+    ctx.beginPath();
+    ctx.arc(cloud.x, cloud.y, cloud.w * 0.25, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.25, cloud.y - cloud.w * 0.12, cloud.w * 0.3, 0, Math.PI * 2);
+    ctx.arc(cloud.x + cloud.w * 0.5, cloud.y, cloud.w * 0.22, 0, Math.PI * 2);
+    ctx.fill();
   }
-  ctx.globalAlpha = 1.0;
+
+  // Sun in top-right corner with rotating rays
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(WIDTH - 60, 50, 30, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + Date.now() / 3000;
+    ctx.beginPath();
+    ctx.moveTo(WIDTH - 60 + Math.cos(angle) * 35, 50 + Math.sin(angle) * 35);
+    ctx.lineTo(WIDTH - 60 + Math.cos(angle) * 48, 50 + Math.sin(angle) * 48);
+    ctx.stroke();
+  }
 }
 
 function drawGround() {
@@ -2609,20 +3052,23 @@ function drawPiggySprite(x, y, facing, state) {
   ctx.fillRect(-6, -21, 12, 1);
 
   // LEGS (2 front, 2 back - offset for depth)
+  // Tuck legs when airborne (60% height)
+  const legH = player.grounded ? 12 : 7;
+  const legOff = player.grounded ? 0 : 2; // pull up slightly when airborne
   ctx.fillStyle = '#FF9CAD';
   // Back legs (slightly behind)
-  ctx.fillRect(-15, 12, 7, 12);
-  ctx.fillRect(8, 12, 7, 12);
+  ctx.fillRect(-15, 12 + legOff, 7, legH);
+  ctx.fillRect(8, 12 + legOff, 7, legH);
   // Front legs (slightly in front, darker)
   ctx.fillStyle = bodyDark;
-  ctx.fillRect(-18, 14, 7, 12);
-  ctx.fillRect(11, 14, 7, 12);
+  ctx.fillRect(-18, 14 + legOff, 7, legH);
+  ctx.fillRect(11, 14 + legOff, 7, legH);
   // Hooves
   ctx.fillStyle = '#8B4513';
-  ctx.fillRect(-18, 24, 7, 3);
-  ctx.fillRect(11, 24, 7, 3);
-  ctx.fillRect(-15, 22, 7, 3);
-  ctx.fillRect(8, 22, 7, 3);
+  ctx.fillRect(-18, 14 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(11, 14 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(-15, 12 + legOff + legH - 1, 7, 3);
+  ctx.fillRect(8, 12 + legOff + legH - 1, 7, 3);
 
   // TAIL (curly!) - at the back
   ctx.strokeStyle = '#FF9CAD';
@@ -2711,7 +3157,8 @@ function drawPiggySprite(x, y, facing, state) {
 
 function drawPiggy() {
   const bobOffset = Math.sin(piggyBobTimer * 3) * 2; // subtle idle bob
-  const drawY = player.y + shakeVisualOffset + bobOffset;
+  const poopSquat = isPooping ? 8 : 0; // squat down when pooping
+  const drawY = player.y + shakeVisualOffset + bobOffset + poopSquat;
 
   ctx.save();
   ctx.translate(player.x, drawY);
@@ -2734,12 +3181,27 @@ function drawPiggy() {
     ctx.globalAlpha = 0.7;
   }
 
+  // Strained red tint when pooping
+  if (isPooping) {
+    ctx.globalAlpha = 0.85;
+  }
+
   // Determine piggy state
-  const piggyState = game.latchedDevil ? 'scared' : piggyDamageTimer > 0 ? 'scared' : 'normal';
+  const piggyState = game.latchedDevil ? 'scared' : piggyDamageTimer > 0 ? 'scared' : isPooping ? 'scared' : 'normal';
 
   // Draw the hand-drawn piggy sprite
   drawPiggySprite(0, 0, player.facingSmooth, piggyState);
   ctx.globalAlpha = 1.0;
+
+  // Red strain overlay when pooping
+  if (isPooping) {
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#cc3300';
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+  }
 
   // Draw crack lines
   if (game.cracks >= 1) {
@@ -2894,6 +3356,26 @@ function drawHUD() {
     if (blink) {
       hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
+  }
+
+  // Poop cooldown indicator
+  if (poopCooldown > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(WIDTH - 90, 95, 80, 12);
+    ctx.fillStyle = '#886600';
+    ctx.fillRect(WIDTH - 90, 95, 80 * (1 - poopCooldown / POOP_COOLDOWN), 12);
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9} ' + Math.ceil(poopCooldown) + 's', WIDTH - 50, 101);
+  } else if (game.level >= 3) {
+    // Show ready indicator when poop is available (from level 3+)
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#886600';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9} OK', WIDTH - 50, 101);
   }
 }
 
@@ -3939,6 +4421,85 @@ function drawPlayingScene() {
     }
   }
 
+  // Lightning warning (pulsing yellow glow on cloud) - draw behind ground elements
+  if (lightningWarning) {
+    const pulse = Math.sin(Date.now() / 80) * 0.3 + 0.5;
+    ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
+    ctx.beginPath();
+    ctx.arc(lightningWarning.x, lightningWarning.y - 10, 25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw poops with stink waves (behind enemies)
+  for (const poop of poops) {
+    ctx.save();
+    ctx.font = '28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
+    // Green stink waves rising
+    const alpha = poop.life / POOP_DURATION;
+    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      const ox = Math.sin(poop.stinkTimer * 2 + i * 2) * 10;
+      ctx.moveTo(poop.x - 15 + ox, poop.y - 10 - i * 12);
+      ctx.quadraticCurveTo(poop.x + ox, poop.y - 20 - i * 12, poop.x + 15 + ox, poop.y - 10 - i * 12);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Ground enemies
+  for (const e of groundEnemies) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    // Flip emoji based on direction
+    if (e.dir < 0) ctx.scale(-1, 1);
+    // Bobbing animation
+    const bob = Math.sin(e.animTimer * 8) * 3;
+    ctx.font = `${e.width}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.emoji, 0, bob);
+    ctx.restore();
+  }
+
+  // Draw vegan ally
+  if (vegan && vegan.state !== 'dead') {
+    ctx.save();
+    ctx.translate(vegan.x, vegan.y);
+
+    // Green aura
+    const auraAlpha = Math.sin(vegan.auraTimer * 3) * 0.15 + 0.2;
+    ctx.fillStyle = `rgba(100, 220, 100, ${auraAlpha})`;
+    ctx.beginPath();
+    ctx.arc(0, -5, 30, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vegan emoji
+    if (vegan.dir < 0) ctx.scale(-1, 1);
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F9D1}\u200D\u{1F33E}', 0, 0);
+
+    // "VEGAN" label
+    ctx.scale(vegan.dir < 0 ? -1 : 1, 1);
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillText('VEGAN', 0, -30);
+
+    // HP bar
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(-15, -40, 30, 5);
+    ctx.fillStyle = vegan.hp > 1 ? '#4CAF50' : '#ff4444';
+    ctx.fillRect(-15, -40, 30 * (vegan.hp / vegan.maxHp), 5);
+
+    ctx.restore();
+  }
+
   // Player (piggy with visual states)
   drawPiggy();
 
@@ -4112,11 +4673,97 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
+  // Lightning bolts
+  for (const bolt of lightningBolts) {
+    // Screen flash
+    if (bolt.flash > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${bolt.flash * 0.3})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    }
+    // Draw jagged bolt
+    ctx.strokeStyle = `rgba(255, 255, 100, ${Math.max(0, bolt.life / 0.3)})`;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#ffff00';
+    ctx.shadowBlur = 15;
+    for (const seg of bolt.segments) {
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+    // Inner bright core
+    ctx.strokeStyle = `rgba(255, 255, 255, ${Math.max(0, bolt.life / 0.3)})`;
+    ctx.lineWidth = 2;
+    for (const seg of bolt.segments) {
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
   // Particles
   drawParticles();
 
   // Score pop-ups
   drawScorePopups();
+
+  // Draw vegan death animation (on top of everything except UI)
+  if (veganDeathAnim) {
+    const da = veganDeathAnim;
+    ctx.save();
+    ctx.globalAlpha = da.opacity;
+    ctx.translate(da.x, da.y);
+
+    // Halo
+    if (da.haloSize > 0) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, -35, 15 * da.haloSize, 5 * da.haloSize, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Angel wings
+    if (da.wingSpread > 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-5, -10);
+      ctx.quadraticCurveTo(-30 * da.wingSpread, -30, -40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(-25 * da.wingSpread, 0, -5, 5);
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(5, -10);
+      ctx.quadraticCurveTo(30 * da.wingSpread, -30, 40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(25 * da.wingSpread, 0, 5, 5);
+      ctx.fill();
+    }
+
+    // Vegan emoji rising
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F607}', 0, 0);
+
+    ctx.restore();
+
+    // Message text
+    if (da.timer > 1.0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (da.timer - 1) / 1.0);
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.strokeText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.restore();
+    }
+  }
 
   // Success flash (green)
   if (successFlashTimer > 0) {
@@ -4292,7 +4939,8 @@ function drawGameOver() {
   // Rotating roast pig
   ctx.save();
   ctx.translate(spitCenterX, spitCenterY);
-  ctx.rotate(rotAngle);
+  const yScale = Math.cos(rotAngle);
+  ctx.scale(1, yScale); // Compress vertically to simulate spit rotation
 
   // Roasted body (darker, golden-brown)
   const roastColor = '#C8852A';
@@ -4319,24 +4967,24 @@ function drawGameOver() {
   // Head
   ctx.fillStyle = roastColor;
   ctx.beginPath();
-  ctx.arc(50, 0, 18, 0, Math.PI * 2);
+  ctx.arc(55, 0, 24, 0, Math.PI * 2);
   ctx.fill();
   // Snout
   ctx.fillStyle = roastDark;
   ctx.beginPath();
-  ctx.ellipse(64, 2, 8, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(76, 3, 11, 8, 0, 0, Math.PI * 2);
   ctx.fill();
   // Closed X eyes (it's roasted!)
   ctx.strokeStyle = '#4A2500';
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(48, -6); ctx.lineTo(54, -1); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(54, -6); ctx.lineTo(48, -1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(53, -8); ctx.lineTo(59, -3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(59, -8); ctx.lineTo(53, -3); ctx.stroke();
   // Ear
   ctx.fillStyle = '#A06820';
   ctx.beginPath();
-  ctx.moveTo(44, -14);
-  ctx.lineTo(40, -26);
-  ctx.lineTo(50, -16);
+  ctx.moveTo(49, -18);
+  ctx.lineTo(45, -32);
+  ctx.lineTo(55, -20);
   ctx.closePath();
   ctx.fill();
 
@@ -4363,19 +5011,19 @@ function drawGameOver() {
   // Apple in mouth!
   ctx.fillStyle = '#cc2222';
   ctx.beginPath();
-  ctx.arc(70, 3, 6, 0, Math.PI * 2);
+  ctx.arc(85, 4, 9, 0, Math.PI * 2);
   ctx.fill();
   // Apple stem
   ctx.strokeStyle = '#4a2200';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(70, -3);
-  ctx.lineTo(71, -7);
+  ctx.moveTo(85, -5);
+  ctx.lineTo(86, -10);
   ctx.stroke();
   // Apple highlight
   ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.beginPath();
-  ctx.arc(68, 1, 2, 0, Math.PI * 2);
+  ctx.arc(83, 2, 2, 0, Math.PI * 2);
   ctx.fill();
 
   // Spit pole through the pig
@@ -4383,7 +5031,7 @@ function drawGameOver() {
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(-70, 0);
-  ctx.lineTo(80, 0);
+  ctx.lineTo(100, 0);
   ctx.stroke();
 
   ctx.restore();
