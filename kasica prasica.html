@@ -42,72 +42,72 @@ window.addEventListener('resize', resizeCanvas);
 
 // --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
-  // HARD MODE: lots of bombs, lots of devils, fast falling!
+  // HARD MODE: tons of devils, fast bombs, chaos!
   let spawnRate, fallSpeed, devilCount, bombChance, billChance, goldChance, duration;
 
   if (level === 1) {
     duration = 30;
-    fallSpeed = 200;
-    spawnRate = 0.6;
-    devilCount = 3;
-    bombChance = 0.10;
+    fallSpeed = 220;
+    spawnRate = 0.5;
+    devilCount = 5;
+    bombChance = 0.12;
     billChance = 0.10;
     goldChance = 0.03;
   } else if (level === 2) {
     duration = 35;
-    fallSpeed = 240;
-    spawnRate = 0.5;
-    devilCount = 5;
-    bombChance = 0.15;
+    fallSpeed = 270;
+    spawnRate = 0.4;
+    devilCount = 8;
+    bombChance = 0.18;
     billChance = 0.15;
     goldChance = 0.05;
   } else if (level === 3) {
     duration = 35;
-    fallSpeed = 280;
-    spawnRate = 0.4;
-    devilCount = 7;
-    bombChance = 0.20;
+    fallSpeed = 320;
+    spawnRate = 0.35;
+    devilCount = 12;
+    bombChance = 0.22;
     billChance = 0.20;
     goldChance = 0.07;
   } else if (level === 4) {
     duration = 40;
-    fallSpeed = 320;
-    spawnRate = 0.35;
-    devilCount = 9;
-    bombChance = 0.25;
+    fallSpeed = 370;
+    spawnRate = 0.28;
+    devilCount = 16;
+    bombChance = 0.28;
     billChance = 0.20;
     goldChance = 0.08;
   } else if (level === 5) {
     duration = 40;
-    fallSpeed = 360;
-    spawnRate = 0.3;
-    devilCount = 12;
-    bombChance = 0.28;
+    fallSpeed = 420;
+    spawnRate = 0.22;
+    devilCount = 20;
+    bombChance = 0.32;
     billChance = 0.25;
     goldChance = 0.10;
   } else if (level === 6) {
     duration = 45;
-    fallSpeed = 400;
-    spawnRate = 0.25;
-    devilCount = 15;
-    bombChance = 0.30;
+    fallSpeed = 470;
+    spawnRate = 0.18;
+    devilCount = 25;
+    bombChance = 0.35;
     billChance = 0.25;
     goldChance = 0.10;
   } else if (level === 7) {
     duration = 45;
-    fallSpeed = 440;
-    spawnRate = 0.22;
-    devilCount = 18;
-    bombChance = 0.33;
+    fallSpeed = 520;
+    spawnRate = 0.15;
+    devilCount = 30;
+    bombChance = 0.38;
     billChance = 0.25;
     goldChance = 0.12;
   } else {
-    // Level 8+: INSANE chaos mode
+    // Level 8+: ABSOLUTE CHAOS
     duration = 40 + level * 3;
-    fallSpeed = 400 + level * 30;
-    spawnRate = Math.max(0.12, 0.22 - (level - 7) * 0.02);
-    devilCount = 15 + level * 2;
-    bombChance = Math.min(0.45, 0.30 + (level - 7) * 0.03);
+    fallSpeed = 480 + level * 35;
+    spawnRate = Math.max(0.10, 0.15 - (level - 7) * 0.01);
+    devilCount = 25 + level * 3;
+    bombChance = Math.min(0.50, 0.35 + (level - 7) * 0.03);
     billChance = 0.25;
     goldChance = 0.12;
   }
@@ -833,12 +833,61 @@ function scheduleMusicalBar() {
   } catch (e) {}
 }
 
-// --- Coin Types ---
+// --- Coin Types (drawn as real coins, not emoji) ---
 const COIN_TYPES = [
-  { emoji: '\u{1FA99}', value: 1, weight: 60 },
-  { emoji: '\u{1F4B5}', value: 5, weight: 25 },
-  { emoji: '\u{1F4B0}', value: 10, weight: 15 }
+  { type: 'bronze', value: 1, weight: 60, colors: ['#CD7F32', '#A0522D', '#8B4513'], label: '1' },
+  { type: 'silver', value: 5, weight: 25, colors: ['#C0C0C0', '#A8A8A8', '#808080'], label: '5' },
+  { type: 'gold',   value: 10, weight: 15, colors: ['#FFD700', '#DAA520', '#B8860B'], label: '10' }
 ];
+
+function drawCoin(x, y, size, coinType, time) {
+  const r = size / 2;
+  // Shimmer effect
+  const shimmer = 0.08 * Math.sin(time * 5 + x * 0.1);
+
+  // Outer ring (darker)
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = coinType.colors[2];
+  ctx.fill();
+  ctx.closePath();
+
+  // Inner face (main color + shimmer)
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.85, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(x - r * 0.2, y - r * 0.2, 0, x, y, r * 0.85);
+  grad.addColorStop(0, lightenColor(coinType.colors[0], 0.3 + shimmer));
+  grad.addColorStop(0.7, coinType.colors[0]);
+  grad.addColorStop(1, coinType.colors[1]);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.closePath();
+
+  // Shine highlight (top-left)
+  ctx.beginPath();
+  ctx.arc(x - r * 0.25, y - r * 0.25, r * 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,' + (0.4 + shimmer) + ')';
+  ctx.fill();
+  ctx.closePath();
+
+  // Value text
+  ctx.font = 'bold ' + (r * 1.1) + 'px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = coinType.colors[2];
+  ctx.fillText(coinType.label, x + 1, y + 1); // shadow
+  ctx.fillStyle = '#fff';
+  ctx.fillText(coinType.label, x, y);
+  ctx.textBaseline = 'alphabetic'; // restore default
+}
+
+function lightenColor(hex, amount) {
+  const num = parseInt(hex.slice(1), 16);
+  let r = Math.min(255, ((num >> 16) & 0xFF) + Math.floor(255 * amount));
+  let g = Math.min(255, ((num >> 8) & 0xFF) + Math.floor(255 * amount));
+  let b = Math.min(255, (num & 0xFF) + Math.floor(255 * amount));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
 
 function pickCoinType() {
   if (!game.levelConfig) return COIN_TYPES[0];
@@ -862,24 +911,25 @@ function spawnObject() {
       y: -size / 2,
       width: size,
       height: size,
-      speed: fallSpeed * 1.4,
+      speed: fallSpeed * 1.6,
       emoji: '\u{1F4A3}',
       value: 0
     });
     return;
   }
 
-  const type = pickCoinType();
-  const size = 36;
+  const coinType = pickCoinType();
+  const size = coinType.value >= 10 ? 40 : (coinType.value >= 5 ? 36 : 30);
   objects.push({
     type: 'coin',
+    coinType: coinType,
     x: Math.random() * (WIDTH - size) + size / 2,
     y: -size / 2,
     width: size,
     height: size,
     speed: fallSpeed,
-    emoji: type.emoji,
-    value: type.value
+    emoji: null,
+    value: coinType.value
   });
 }
 
@@ -911,6 +961,11 @@ function spawnDevil() {
       break;
   }
 
+  // Zigzag parameters - unpredictable side-to-side movement
+  const zigzagSpeed = 80 + Math.random() * 120; // how fast they swerve
+  const zigzagFreq = 1.5 + Math.random() * 3;   // how often they change direction
+  const zigzagPhase = Math.random() * Math.PI * 2; // random start phase
+
   objects.push({
     type: 'devil',
     devilType: devilType,
@@ -918,7 +973,9 @@ function spawnDevil() {
     width: size, height: size, speed,
     latched: false, hammerTimer: 0, shakeProgress: 0,
     shakeRequired, hammerTimeout, hammerAnimTimer: 0,
-    stealTimer: 0
+    stealTimer: 0,
+    zigzagSpeed, zigzagFreq, zigzagPhase,
+    zigzagTime: 0 // tracks time for zigzag calculation
   });
 }
 
@@ -1331,6 +1388,18 @@ function update(dt) {
     const obj = objects[i];
     obj.y += obj.speed * dt;
 
+    // Zigzag movement for devils
+    if (obj.type === 'devil' && !obj.latched && !obj.flyAway && obj.zigzagSpeed) {
+      obj.zigzagTime += dt;
+      // Unpredictable swerving using combined sine waves
+      const swerve = Math.sin(obj.zigzagTime * obj.zigzagFreq + obj.zigzagPhase)
+                    + 0.5 * Math.sin(obj.zigzagTime * obj.zigzagFreq * 2.3 + obj.zigzagPhase * 1.7);
+      obj.x += swerve * obj.zigzagSpeed * dt;
+      // Keep within canvas bounds
+      if (obj.x < obj.width / 2) obj.x = obj.width / 2;
+      if (obj.x > WIDTH - obj.width / 2) obj.x = WIDTH - obj.width / 2;
+    }
+
     // Fly-away devils
     if (obj.flyAway) {
       obj.flyAwayTimer -= dt;
@@ -1672,16 +1741,27 @@ function drawPlayingScene() {
   // Falling objects
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  const now = performance.now() / 1000;
   for (const obj of objects) {
-    if (obj.type === 'bomb') {
+    if (obj.type === 'coin' && obj.coinType) {
+      // Draw custom coin graphics
+      drawCoin(obj.x, obj.y, obj.width, obj.coinType, now);
+    } else if (obj.type === 'bomb') {
       ctx.font = '36px sans-serif';
+      // Pulsing glow on bombs
+      const pulseR = 20 + 5 * Math.sin(now * 10);
+      ctx.shadowColor = '#ff4400';
+      ctx.shadowBlur = pulseR;
+      ctx.fillText(obj.emoji, obj.x, obj.y);
+      ctx.shadowBlur = 0;
     } else if (obj.type === 'devil') {
       const dSize = obj.width || 38;
       ctx.font = dSize + 'px sans-serif';
+      ctx.fillText(obj.emoji, obj.x, obj.y);
     } else {
       ctx.font = '32px sans-serif';
+      ctx.fillText(obj.emoji || '', obj.x, obj.y);
     }
-    ctx.fillText(obj.emoji, obj.x, obj.y);
   }
 
   // Player (piggy with visual states)
