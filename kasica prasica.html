@@ -163,7 +163,7 @@
 </div>
 
 <script>
-const WIDTH = 800;
+const WIDTH = 1200;
 const HEIGHT = 600;
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -3131,21 +3131,25 @@ function update(dt) {
       const available = Object.entries(GROUND_ENEMY_TYPES)
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
-      const fromLeft = Math.random() > 0.5;
-      groundEnemies.push({
-        type: key,
-        emoji: type.emoji,
-        x: fromLeft ? -30 : WIDTH + 30,
-        y: HEIGHT - 45,
-        width: type.size,
-        height: type.size,
-        speed: type.speed,
-        dir: fromLeft ? 1 : -1,
-        ai: type.ai,
-        pauseTimer: 0,
-        animTimer: 0
-      });
-    }
+      // Wolves spawn half as often — skip and retry soon
+      if (key === 'wolf' && Math.random() < 0.5) {
+        groundEnemySpawnTimer = 0.5;
+      } else {
+        const fromLeft = Math.random() > 0.5;
+        groundEnemies.push({
+          type: key,
+          emoji: type.emoji,
+          x: fromLeft ? -30 : WIDTH + 30,
+          y: HEIGHT - 45,
+          width: type.size,
+          height: type.size,
+          speed: type.speed,
+          dir: fromLeft ? 1 : -1,
+          ai: type.ai,
+          pauseTimer: 0,
+          animTimer: 0
+        });
+      }
   }
 
   for (let i = groundEnemies.length - 1; i >= 0; i--) {
@@ -3390,6 +3394,281 @@ function drawGround() {
     ctx.fillText('\u{1F33F}', x, groundY + 6);
   }
   ctx.globalAlpha = 1.0;
+}
+
+// --- Hand-drawn Wolf ---
+function drawWolf(x, y, dir, animTimer) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const legPhase = animTimer * 10;
+
+  // Body - gray oval
+  ctx.fillStyle = '#666';
+  ctx.beginPath();
+  ctx.ellipse(0, -8, 28, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Darker back
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.ellipse(0, -12, 24, 8, 0, Math.PI, 0);
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = '#777';
+  ctx.beginPath();
+  ctx.arc(24, -14, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Snout
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.ellipse(34, -12, 7, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eye - menacing red
+  ctx.fillStyle = '#ff0000';
+  ctx.beginPath();
+  ctx.arc(28, -17, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(28.5, -17, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ears - pointed
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.moveTo(20, -22);
+  ctx.lineTo(16, -34);
+  ctx.lineTo(24, -24);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(26, -22);
+  ctx.lineTo(24, -33);
+  ctx.lineTo(30, -23);
+  ctx.fill();
+
+  // Teeth
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(36, -9);
+  ctx.lineTo(34, -5);
+  ctx.lineTo(38, -5);
+  ctx.fill();
+
+  // Tail - bushy
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.moveTo(-28, -10);
+  ctx.quadraticCurveTo(-38, -25, -32, -28);
+  ctx.quadraticCurveTo(-28, -22, -26, -12);
+  ctx.fill();
+
+  // Legs - animated walking
+  ctx.fillStyle = '#555';
+  const frontLeg1 = Math.sin(legPhase) * 8;
+  const frontLeg2 = Math.sin(legPhase + Math.PI) * 8;
+  const backLeg1 = Math.sin(legPhase + Math.PI / 2) * 8;
+  const backLeg2 = Math.sin(legPhase + Math.PI * 1.5) * 8;
+
+  // Front legs
+  ctx.fillRect(12 + frontLeg1, 2, 5, 16);
+  ctx.fillRect(18 + frontLeg2, 2, 5, 16);
+  // Back legs
+  ctx.fillRect(-14 + backLeg1, 2, 5, 16);
+  ctx.fillRect(-8 + backLeg2, 2, 5, 16);
+
+  // Paws
+  ctx.fillStyle = '#444';
+  ctx.fillRect(11 + frontLeg1, 16, 7, 3);
+  ctx.fillRect(17 + frontLeg2, 16, 7, 3);
+  ctx.fillRect(-15 + backLeg1, 16, 7, 3);
+  ctx.fillRect(-9 + backLeg2, 16, 7, 3);
+
+  ctx.restore();
+}
+
+// --- Hand-drawn Vegan ---
+function drawVeganSprite(x, y, dir, animTimer, state) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const walkPhase = animTimer * 6;
+
+  // Legs - walking animation
+  ctx.fillStyle = '#2E7D32';
+  const leg1 = Math.sin(walkPhase) * 6;
+  const leg2 = Math.sin(walkPhase + Math.PI) * 6;
+  ctx.fillRect(-6 + leg1, 8, 6, 20);
+  ctx.fillRect(2 + leg2, 8, 6, 20);
+  // Shoes
+  ctx.fillStyle = '#4CAF50';
+  ctx.fillRect(-7 + leg1, 26, 8, 4);
+  ctx.fillRect(1 + leg2, 26, 8, 4);
+
+  // Body - green shirt
+  ctx.fillStyle = '#4CAF50';
+  ctx.fillRect(-10, -15, 22, 25);
+
+  // Arms
+  const armSwing = Math.sin(walkPhase) * 10;
+  ctx.fillStyle = '#4CAF50';
+  ctx.fillRect(-14, -12, 5, 18 + armSwing * 0.3);
+  ctx.fillRect(11, -12, 5, 18 - armSwing * 0.3);
+
+  // Hands - skin color
+  ctx.fillStyle = '#FDBCB4';
+  ctx.beginPath();
+  ctx.arc(-12, 8 + armSwing * 0.3, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(13, 8 - armSwing * 0.3, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Holding vegetable
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('\u{1F96C}', 13, 6 - armSwing * 0.3);
+
+  // Head
+  ctx.fillStyle = '#FDBCB4';
+  ctx.beginPath();
+  ctx.arc(1, -22, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hair - green beanie
+  ctx.fillStyle = '#2E7D32';
+  ctx.beginPath();
+  ctx.arc(1, -26, 10, Math.PI, 0);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-2, -23, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, -23, 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Smile
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(1, -19, 5, 0.1, Math.PI - 0.1);
+  ctx.stroke();
+
+  // "VEGAN" text on shirt
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 7px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('VEGAN', 1, -2);
+
+  // Peace sign if defending
+  if (state === 'defend') {
+    ctx.font = '16px sans-serif';
+    ctx.fillText('\u270C\uFE0F', -12, -35);
+  }
+
+  ctx.restore();
+}
+
+// --- Hand-drawn Farmer ---
+function drawFarmerSprite(x, y, dir, animTimer) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const walkPhase = animTimer * 5;
+
+  // Legs - blue overalls
+  ctx.fillStyle = '#1565C0';
+  const leg1 = Math.sin(walkPhase) * 5;
+  const leg2 = Math.sin(walkPhase + Math.PI) * 5;
+  ctx.fillRect(-6 + leg1, 8, 6, 20);
+  ctx.fillRect(2 + leg2, 8, 6, 20);
+  // Boots
+  ctx.fillStyle = '#5D4037';
+  ctx.fillRect(-7 + leg1, 26, 8, 5);
+  ctx.fillRect(1 + leg2, 26, 8, 5);
+
+  // Body - overalls
+  ctx.fillStyle = '#1565C0';
+  ctx.fillRect(-10, -12, 22, 22);
+  // Shirt underneath
+  ctx.fillStyle = '#F44336';
+  ctx.fillRect(-8, -15, 18, 6);
+
+  // Suspender straps
+  ctx.strokeStyle = '#0D47A1';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-6, -12);
+  ctx.lineTo(-4, 5);
+  ctx.moveTo(8, -12);
+  ctx.lineTo(6, 5);
+  ctx.stroke();
+
+  // Arms
+  ctx.fillStyle = '#F44336';
+  ctx.fillRect(-14, -12, 5, 15);
+  ctx.fillRect(11, -12, 5, 15);
+
+  // Head
+  ctx.fillStyle = '#FDBCB4';
+  ctx.beginPath();
+  ctx.arc(1, -22, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Straw hat
+  ctx.fillStyle = '#FFD54F';
+  // Hat brim
+  ctx.fillRect(-14, -30, 30, 4);
+  // Hat top
+  ctx.fillRect(-6, -38, 14, 10);
+
+  // Angry eyes
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-3, -23, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, -23, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Angry eyebrows
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-6, -27);
+  ctx.lineTo(-1, -26);
+  ctx.moveTo(3, -26);
+  ctx.lineTo(8, -27);
+  ctx.stroke();
+
+  // Pitchfork (held in right hand)
+  ctx.strokeStyle = '#8B4513';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(15, -10);
+  ctx.lineTo(15, -45);
+  ctx.stroke();
+  // Fork tines
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(12, -45);
+  ctx.lineTo(12, -52);
+  ctx.moveTo(15, -45);
+  ctx.lineTo(15, -52);
+  ctx.moveTo(18, -45);
+  ctx.lineTo(18, -52);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawPiggySprite(x, y, facing, state) {
@@ -5103,51 +5382,42 @@ function drawPlayingScene() {
 
   // Ground enemies
   for (const e of groundEnemies) {
-    ctx.save();
-    ctx.translate(e.x, e.y);
-    // Flip emoji based on direction
-    if (e.dir < 0) ctx.scale(-1, 1);
-    // Bobbing animation
-    const bob = Math.sin(e.animTimer * 8) * 3;
-    ctx.font = `${e.width}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(e.emoji, 0, bob);
-    ctx.restore();
+    if (e.type === 'wolf') {
+      drawWolf(e.x, e.y, e.dir, e.animTimer);
+    } else if (e.type === 'farmer') {
+      drawFarmerSprite(e.x, e.y, e.dir, e.animTimer);
+    } else {
+      // Fox and carnivore keep emoji for now
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      if (e.dir < 0) ctx.scale(-1, 1);
+      const bob = Math.sin(e.animTimer * 8) * 3;
+      ctx.font = `${e.width}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(e.emoji, 0, bob);
+      ctx.restore();
+    }
   }
 
   // Draw vegan ally
   if (vegan && vegan.state !== 'dead') {
+    // Green aura
     ctx.save();
     ctx.translate(vegan.x, vegan.y);
-
-    // Green aura
     const auraAlpha = Math.sin(vegan.auraTimer * 3) * 0.15 + 0.2;
     ctx.fillStyle = `rgba(100, 220, 100, ${auraAlpha})`;
     ctx.beginPath();
     ctx.arc(0, -5, 30, 0, Math.PI * 2);
     ctx.fill();
-
-    // Vegan emoji
-    if (vegan.dir < 0) ctx.scale(-1, 1);
-    ctx.font = '40px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('\u{1F9D1}\u200D\u{1F33E}', 0, 0);
-
-    // "VEGAN" label
-    ctx.scale(vegan.dir < 0 ? -1 : 1, 1);
-    ctx.font = 'bold 10px sans-serif';
-    ctx.fillStyle = '#4CAF50';
-    ctx.fillText('VEGAN', 0, -30);
-
     // HP bar
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(-15, -40, 30, 5);
     ctx.fillStyle = vegan.hp > 1 ? '#4CAF50' : '#ff4444';
     ctx.fillRect(-15, -40, 30 * (vegan.hp / vegan.maxHp), 5);
-
     ctx.restore();
+    // Draw the vegan sprite
+    drawVeganSprite(vegan.x, vegan.y, vegan.dir, vegan.auraTimer, vegan.state);
   }
 
   // Player (piggy with visual states)
