@@ -155,6 +155,13 @@ let successFlashTimer = 0;
 let shakeHintTimer = 0;
 let devilTypeIndicator = null; // {text, color, timer}
 
+// --- Fart Mechanic ---
+let fartCharges = 5;          // start with 5 farts
+const MAX_FARTS = 5;
+const fartClouds = [];         // active fart clouds flying upward
+let fartCooldown = 0;          // prevent spam (0.5s cooldown)
+const chokingDevils = [];      // devils that got farted on (dying animation)
+
 // --- Particle System ---
 const particles = [];
 const MAX_PARTICLES = 100;
@@ -601,6 +608,104 @@ function playGameOver() {
   });
 }
 
+function playFartSound() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+
+    // Low rumbling base - the main "brrrrp"
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(80, t);
+    osc1.frequency.linearRampToValueAtTime(60, t + 0.1);
+    osc1.frequency.linearRampToValueAtTime(100, t + 0.2);
+    osc1.frequency.linearRampToValueAtTime(40, t + 0.4);
+    // Vibrato for the "flapping" quality
+    const vibrato = ctx.createOscillator();
+    vibrato.frequency.value = 25; // fast wobble
+    const vibGain = ctx.createGain();
+    vibGain.gain.value = 30;
+    vibrato.connect(vibGain);
+    vibGain.connect(osc1.frequency);
+
+    gain1.gain.setValueAtTime(0.3, t);
+    gain1.gain.linearRampToValueAtTime(0.4, t + 0.08);
+    gain1.gain.linearRampToValueAtTime(0.2, t + 0.25);
+    gain1.gain.linearRampToValueAtTime(0, t + 0.45);
+
+    // Low pass filter for muffled quality
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = 400;
+
+    osc1.connect(lpf);
+    lpf.connect(gain1);
+    gain1.connect(ctx.destination);
+    vibrato.start(t);
+    osc1.start(t);
+    osc1.stop(t + 0.45);
+    vibrato.stop(t + 0.45);
+
+    // Noise burst for the "pffft" texture
+    const bufSize = ctx.sampleRate * 0.3;
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i/bufSize) * 0.5;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buf;
+    const nGain = ctx.createGain();
+    nGain.gain.setValueAtTime(0.15, t);
+    nGain.gain.linearRampToValueAtTime(0, t + 0.3);
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'lowpass';
+    nFilter.frequency.value = 300;
+    noise.connect(nFilter);
+    nFilter.connect(nGain);
+    nGain.connect(ctx.destination);
+    noise.start(t);
+    noise.stop(t + 0.3);
+
+    // High pitched squeak at the end (like a real fart ending)
+    const squeak = ctx.createOscillator();
+    const squeakGain = ctx.createGain();
+    squeak.type = 'sine';
+    squeak.frequency.setValueAtTime(600, t + 0.3);
+    squeak.frequency.linearRampToValueAtTime(900, t + 0.38);
+    squeakGain.gain.setValueAtTime(0, t + 0.3);
+    squeakGain.gain.linearRampToValueAtTime(0.08, t + 0.33);
+    squeakGain.gain.linearRampToValueAtTime(0, t + 0.4);
+    squeak.connect(squeakGain);
+    squeakGain.connect(ctx.destination);
+    squeak.start(t + 0.3);
+    squeak.stop(t + 0.4);
+  } catch(e) {}
+}
+
+function playChokingSound() {
+  try {
+    const ctx = getAudioContext();
+    const t = ctx.currentTime;
+    // Coughing/gagging sounds - rapid pitch changes
+    for (let i = 0; i < 4; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      const startT = t + i * 0.15;
+      osc.frequency.setValueAtTime(300 + i * 50, startT);
+      osc.frequency.linearRampToValueAtTime(150, startT + 0.08);
+      gain.gain.setValueAtTime(0.12, startT);
+      gain.gain.linearRampToValueAtTime(0, startT + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startT);
+      osc.stop(startT + 0.12);
+    }
+  } catch(e) {}
+}
+
 // --- Background Music System ---
 let musicPlaying = false;
 let musicNodes = null;
@@ -925,6 +1030,22 @@ function spawnObject() {
     return;
   }
 
+  // Corn for fart refill (only when farts < max)
+  if (fartCharges < MAX_FARTS && Math.random() < 0.06) {
+    const cornSize = 36;
+    objects.push({
+      type: 'corn',
+      emoji: '\u{1F33D}',
+      x: Math.random() * (WIDTH - cornSize) + cornSize / 2,
+      y: -cornSize / 2,
+      width: cornSize,
+      height: cornSize,
+      speed: fallSpeed * 0.8,
+      value: 0
+    });
+    return;
+  }
+
   // Rare special items: bill (💵 +20) and moneybag (💰 +30)
   const lvl = game.level || 1;
   const specialRoll = Math.random();
@@ -1045,6 +1166,12 @@ function startLevel() {
     game.devilSchedule.sort((a, b) => b - a); // sort descending (highest time first)
   }
 
+  // Reset fart state
+  fartCharges = MAX_FARTS; // refill farts each level
+  fartClouds.length = 0;
+  chokingDevils.length = 0;
+  fartCooldown = 0;
+
   // Clear everything
   objects.length = 0;
   ejectedCoins.length = 0;
@@ -1091,6 +1218,34 @@ window.addEventListener('keydown', (e) => {
       shakeVisualTimer = 0.08;
       playShakeSound();
     }
+  }
+
+  // Fart mechanic - SPACE during gameplay
+  if (e.key === ' ' && game.screen === 'playing') {
+    if (fartCharges > 0 && fartCooldown <= 0) {
+      fartCharges--;
+      fartCooldown = 0.5; // half second cooldown
+      // Spawn fart cloud at piggy's butt (behind/below the piggy)
+      fartClouds.push({
+        x: player.x,
+        y: player.y + 15,  // starts at butt level
+        width: 50,
+        height: 40,
+        vy: -250,           // flies upward fast
+        life: 2.0,          // lasts 2 seconds
+        opacity: 0.8,
+        scale: 1.0,
+        wobble: 0            // for wobbly movement
+      });
+      playFartSound();
+      // Spawn green stink particles at butt
+      spawnParticles(player.x, player.y + 20, '\u{1F4A8}', 5, 80);
+      spawnParticles(player.x, player.y + 15, '\u{1F49A}', 3, 60);
+      // Small screen shake for comedy
+      triggerScreenShake(3, 0.15);
+    }
+    e.preventDefault();
+    return; // don't fall through to title/gameover handlers
   }
 
   if (e.key === ' ') {
@@ -1297,6 +1452,67 @@ function update(dt) {
     }
   }
 
+  // Update fart cooldown
+  if (fartCooldown > 0) fartCooldown -= dt;
+
+  // Update fart clouds
+  for (let i = fartClouds.length - 1; i >= 0; i--) {
+    const cloud = fartClouds[i];
+    cloud.y += cloud.vy * dt;              // fly upward
+    cloud.wobble += dt * 4;                 // wobble side to side
+    cloud.x += Math.sin(cloud.wobble) * 30 * dt;
+    cloud.scale += dt * 0.5;                // grows bigger as it rises
+    cloud.life -= dt;
+    cloud.opacity = Math.min(0.8, cloud.life / 1.0);
+
+    if (cloud.life <= 0) {
+      fartClouds.splice(i, 1);
+      continue;
+    }
+
+    // Check collision with falling devils
+    for (let j = objects.length - 1; j >= 0; j--) {
+      const obj = objects[j];
+      if (obj.type === 'devil' && !obj.latched && !obj.flyAway) {
+        // Wide hitbox for the cloud
+        const cloudW = cloud.width * cloud.scale;
+        const cloudH = cloud.height * cloud.scale;
+        if (Math.abs(cloud.x - obj.x) < (cloudW + obj.width) / 2 &&
+            Math.abs(cloud.y - obj.y) < (cloudH + obj.height) / 2) {
+          // Devil got FARTED ON!
+          chokingDevils.push({
+            emoji: obj.emoji,
+            x: obj.x,
+            y: obj.y,
+            width: obj.width,
+            timer: 1.5,          // choking animation duration
+            coughTimer: 0,
+            opacity: 1.0,
+            greenTint: 1.0        // turns green from the stink
+          });
+          objects.splice(j, 1);
+          playChokingSound();
+          spawnParticles(obj.x, obj.y, '\u{1F922}', 3, 100);
+          spawnParticles(obj.x, obj.y, '\u{1F480}', 2, 80);
+          spawnScorePopup(obj.x, obj.y, '\u2620\uFE0F', '#44ff44');
+          break; // one devil per cloud
+        }
+      }
+    }
+  }
+
+  // Update choking devils
+  for (let i = chokingDevils.length - 1; i >= 0; i--) {
+    const cd = chokingDevils[i];
+    cd.timer -= dt;
+    cd.coughTimer += dt;
+    cd.opacity = Math.max(0, cd.timer / 1.0);
+    cd.y -= 20 * dt; // slowly floats up while dying
+    if (cd.timer <= 0) {
+      chokingDevils.splice(i, 1);
+    }
+  }
+
   // Update latched devil
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
@@ -1491,6 +1707,13 @@ function update(dt) {
             devilTypeIndicator = { text: '\u{1F911} LOPOV!', color: '#cc44ff', timer: 1.5 };
           }
         }
+        objects.splice(i, 1);
+        continue;
+      } else if (obj.type === 'corn') {
+        fartCharges = Math.min(MAX_FARTS, fartCharges + 1);
+        spawnParticles(obj.x, obj.y, '\u{1F33D}', 3, 100);
+        spawnScorePopup(obj.x, obj.y - 10, '\u{1F4A8}+1', '#88cc44');
+        playCoinCollect(); // reuse coin sound
         objects.splice(i, 1);
         continue;
       } else {
@@ -1737,6 +1960,37 @@ function drawHUD() {
     }
   }
   ctx.globalAlpha = 1.0;
+
+  // Fart meter (below score)
+  const fartY = 48;
+  hudText('\u{1F4A8} ', 15, fartY, '20px sans-serif', '#88cc44', 'left');
+  for (let i = 0; i < MAX_FARTS; i++) {
+    const fx = 42 + i * 22;
+    if (i < fartCharges) {
+      // Full charge - green cloud
+      ctx.fillStyle = '#66cc33';
+      ctx.beginPath();
+      ctx.arc(fx, fartY + 10, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\u{1F4A8}', fx, fartY + 10);
+    } else {
+      // Empty - gray circle
+      ctx.fillStyle = 'rgba(100,100,100,0.4)';
+      ctx.beginPath();
+      ctx.arc(fx, fartY + 10, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Show corn hint when low on farts
+  if (fartCharges === 0) {
+    const blink = Math.sin(Date.now() / 300) > 0;
+    if (blink) {
+      hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
+    }
+  }
 }
 
 function draw() {
@@ -1794,6 +2048,58 @@ function drawPlayingScene() {
 
   drawGround();
 
+  // Draw fart clouds (behind falling objects)
+  for (const cloud of fartClouds) {
+    ctx.save();
+    ctx.globalAlpha = cloud.opacity;
+    ctx.translate(cloud.x, cloud.y);
+    ctx.scale(cloud.scale, cloud.scale);
+
+    // Green stink cloud - multiple overlapping circles
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
+    gradient.addColorStop(0, 'rgba(80, 180, 30, 0.6)');
+    gradient.addColorStop(0.5, 'rgba(100, 200, 40, 0.3)');
+    gradient.addColorStop(1, 'rgba(120, 220, 50, 0)');
+
+    // Main cloud blob
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.fill();
+    // Side blobs for cloud shape
+    ctx.beginPath();
+    ctx.arc(-12, -5, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(12, -3, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, -12, 16, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stink lines (wavy lines emanating from cloud)
+    ctx.strokeStyle = 'rgba(80, 180, 30, ' + (cloud.opacity * 0.5) + ')';
+    ctx.lineWidth = 2;
+    for (let s = 0; s < 3; s++) {
+      const angle = (s / 3) * Math.PI * 2 + cloud.wobble;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * 15, Math.sin(angle) * 15);
+      ctx.quadraticCurveTo(
+        Math.cos(angle + 0.3) * 30, Math.sin(angle + 0.3) * 30,
+        Math.cos(angle + 0.6) * 20, Math.sin(angle + 0.6) * 20
+      );
+      ctx.stroke();
+    }
+
+    // Tiny 💨 emoji in center
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A8}', 0, 0);
+
+    ctx.restore();
+  }
+
   // Falling objects
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -1820,6 +2126,13 @@ function drawPlayingScene() {
       const pulseR = 20 + 5 * Math.sin(now * 10);
       ctx.shadowColor = '#ff4400';
       ctx.shadowBlur = pulseR;
+      ctx.fillText(obj.emoji, obj.x, obj.y);
+      ctx.shadowBlur = 0;
+    } else if (obj.type === 'corn') {
+      ctx.font = '32px sans-serif';
+      const cornGlow = 8 + 4 * Math.sin(now * 5);
+      ctx.shadowColor = '#ffcc00';
+      ctx.shadowBlur = cornGlow;
       ctx.fillText(obj.emoji, obj.x, obj.y);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'devil') {
@@ -1953,6 +2266,41 @@ function drawPlayingScene() {
       ctx.restore();
       ctx.globalAlpha = 1.0;
     }
+  }
+
+  // Draw choking devils
+  for (const cd of chokingDevils) {
+    ctx.save();
+    ctx.globalAlpha = cd.opacity;
+    ctx.translate(cd.x, cd.y);
+
+    // Shake/convulse while choking
+    const shakeX = Math.sin(cd.coughTimer * 30) * 5;
+    ctx.translate(shakeX, 0);
+
+    // Draw devil emoji
+    ctx.font = (cd.width || 38) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cd.emoji, 0, 0);
+
+    // Coughing text that pops up periodically
+    if (Math.floor(cd.coughTimer * 5) % 2 === 0) {
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillStyle = '#44ff44';
+      ctx.fillText('\u{1F922}', 20, -15);
+    }
+
+    // Green stink swirls around the devil
+    ctx.font = '12px sans-serif';
+    for (let s = 0; s < 3; s++) {
+      const angle = cd.coughTimer * 3 + s * 2.1;
+      const sx = Math.cos(angle) * 20;
+      const sy = Math.sin(angle) * 15;
+      ctx.fillText('\u{1F4A8}', sx, sy);
+    }
+
+    ctx.restore();
   }
 
   // Particles
