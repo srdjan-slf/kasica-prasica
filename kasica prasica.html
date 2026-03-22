@@ -88,17 +88,21 @@
     top: 8px;
     right: 8px;
     z-index: 200;
-    background: rgba(0,0,0,0.4);
+    background: rgba(0,0,0,0.5);
     color: white;
-    border: 2px solid rgba(255,255,255,0.5);
-    border-radius: 8px;
-    font-size: 20px;
-    padding: 6px 10px;
+    border: 2px solid rgba(255,255,255,0.6);
+    border-radius: 10px;
+    font-size: 22px;
+    padding: 8px 14px;
     cursor: pointer;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 44px;
+    min-height: 44px;
   }
-  #fullscreenBtn:hover { background: rgba(0,0,0,0.6); }
+  #fullscreenBtn:hover, #fullscreenBtn:active { background: rgba(0,0,0,0.7); }
   #pauseBtn {
     display: none;
     position: fixed;
@@ -129,7 +133,7 @@
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
-<button id="fullscreenBtn" onclick="toggleFullscreen()">&#x26F6;</button>
+<button id="fullscreenBtn">&#x26F6;</button>
 <button id="pauseBtn" onclick="if(game.screen==='playing'){isPaused=!isPaused;}">&#x23F8;</button>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
@@ -178,15 +182,35 @@ window.addEventListener('resize', resizeCanvas);
 window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 100); });
 
 function toggleFullscreen() {
+  const elem = document.documentElement;
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-    const elem = document.documentElement;
-    if (elem.requestFullscreen) elem.requestFullscreen();
-    else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+    // Try standard Fullscreen API first
+    if (elem.requestFullscreen) {
+      elem.requestFullscreen().catch(() => {});
+    } else if (elem.webkitRequestFullscreen) {
+      // Safari/iOS older versions
+      elem.webkitRequestFullscreen();
+    }
   } else {
-    if (document.exitFullscreen) document.exitFullscreen();
-    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
   }
 }
+
+// Fullscreen button - use touchend for mobile (required for user gesture)
+const fsBtn = document.getElementById('fullscreenBtn');
+fsBtn.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  toggleFullscreen();
+}, { passive: false });
+fsBtn.addEventListener('click', function(e) {
+  // Desktop click fallback (touchend already handles mobile)
+  if (!('ontouchstart' in window)) toggleFullscreen();
+});
 
 // --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
@@ -2147,7 +2171,9 @@ canvas.addEventListener('click', () => {
     resurrectionCount = 0;
     // Auto-fullscreen on mobile game start
     if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
-      (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)?.call(document.documentElement).catch(() => {});
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     }
     startLevel();
   } else if (game.screen === 'gameOver') {
