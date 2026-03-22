@@ -236,71 +236,72 @@ function getLevelConfig(level) {
   // HARD MODE: tons of devils, fast bombs, chaos!
   let spawnRate, fallSpeed, devilCount, bombChance, billChance, goldChance, duration;
 
+  // 50% EASIER: slower fall, fewer devils, less bombs, more coins
   if (level === 1) {
-    duration = 30;
-    fallSpeed = 154;
-    spawnRate = 0.65;
-    devilCount = 3;
-    bombChance = 0.12;
-    billChance = 0.10;
-    goldChance = 0.03;
+    duration = 35;
+    fallSpeed = 80;
+    spawnRate = 1.0;
+    devilCount = 1;
+    bombChance = 0.06;
+    billChance = 0.12;
+    goldChance = 0.04;
   } else if (level === 2) {
-    duration = 35;
-    fallSpeed = 189;
-    spawnRate = 0.52;
-    devilCount = 6;
-    bombChance = 0.18;
-    billChance = 0.15;
-    goldChance = 0.05;
+    duration = 40;
+    fallSpeed = 95;
+    spawnRate = 0.85;
+    devilCount = 2;
+    bombChance = 0.09;
+    billChance = 0.18;
+    goldChance = 0.06;
   } else if (level === 3) {
-    duration = 35;
-    fallSpeed = 224;
-    spawnRate = 0.455;
-    devilCount = 9;
-    bombChance = 0.22;
-    billChance = 0.20;
-    goldChance = 0.07;
-  } else if (level === 4) {
     duration = 40;
-    fallSpeed = 259;
-    spawnRate = 0.364;
-    devilCount = 12;
-    bombChance = 0.28;
-    billChance = 0.20;
+    fallSpeed = 110;
+    spawnRate = 0.7;
+    devilCount = 4;
+    bombChance = 0.11;
+    billChance = 0.22;
     goldChance = 0.08;
+  } else if (level === 4) {
+    duration = 45;
+    fallSpeed = 130;
+    spawnRate = 0.6;
+    devilCount = 5;
+    bombChance = 0.14;
+    billChance = 0.22;
+    goldChance = 0.09;
   } else if (level === 5) {
-    duration = 40;
-    fallSpeed = 294;
-    spawnRate = 0.286;
-    devilCount = 15;
-    bombChance = 0.32;
-    billChance = 0.25;
-    goldChance = 0.10;
+    duration = 45;
+    fallSpeed = 150;
+    spawnRate = 0.5;
+    devilCount = 7;
+    bombChance = 0.16;
+    billChance = 0.28;
+    goldChance = 0.12;
   } else if (level === 6) {
-    duration = 45;
-    fallSpeed = 329;
-    spawnRate = 0.234;
-    devilCount = 18;
-    bombChance = 0.35;
-    billChance = 0.25;
-    goldChance = 0.10;
+    duration = 50;
+    fallSpeed = 165;
+    spawnRate = 0.42;
+    devilCount = 9;
+    bombChance = 0.18;
+    billChance = 0.28;
+    goldChance = 0.12;
   } else if (level === 7) {
-    duration = 45;
-    fallSpeed = 364;
-    spawnRate = 0.195;
-    devilCount = 22;
-    bombChance = 0.38;
-    billChance = 0.25;
-    goldChance = 0.12;
+    duration = 50;
+    fallSpeed = 180;
+    spawnRate = 0.35;
+    devilCount = 11;
+    bombChance = 0.20;
+    billChance = 0.28;
+    goldChance = 0.14;
   } else {
-    // Level 8+: ABSOLUTE CHAOS
-    duration = 40 + level * 3;
-    fallSpeed = (480 + level * 35) * 0.7;
-    spawnRate = Math.max(0.13, 0.195 - (level - 7) * 0.013);
-    devilCount = Math.floor((25 + level * 3) * 0.75);
-    bombChance = Math.min(0.50, 0.35 + (level - 7) * 0.03);
-    billChance = 0.25;
-    goldChance = 0.12;
+    // Level 8+: Gets harder but still playable
+    duration = 45 + level * 3;
+    fallSpeed = Math.min(280, 180 + (level - 7) * 18);
+    spawnRate = Math.max(0.2, 0.35 - (level - 7) * 0.02);
+    devilCount = Math.min(18, 11 + (level - 7) * 2);
+    bombChance = Math.min(0.30, 0.20 + (level - 7) * 0.02);
+    billChance = 0.28;
+    goldChance = 0.14;
   }
 
   return { duration, fallSpeed, spawnRate, devilCount, bombChance, billChance, goldChance };
@@ -432,10 +433,10 @@ const groundEnemies = [];
 let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
-  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 88, ai: 'straight', fromLevel: 3, size: 64 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 65, ai: 'chase', fromLevel: 4, size: 40 },
-  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 137, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 74, ai: 'relentless', fromLevel: 6, size: 42 }
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 44, ai: 'straight', fromLevel: 3, size: 64 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 32, ai: 'chase', fromLevel: 4, size: 48 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 68, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 37, ai: 'relentless', fromLevel: 6, size: 42 }
 };
 
 // --- Shake Mechanic ---
@@ -466,6 +467,7 @@ let poopAnimTimer = 0;
 // --- Vegan Ally ---
 let vegan = null;
 let veganDeathAnim = null;
+let veganRespawnTimer = 0;
 
 // --- Particle System ---
 const particles = [];
@@ -2017,13 +2019,15 @@ function startLevel() {
   poopAnimTimer = 0;
   vegan = null;
   veganDeathAnim = null;
-  if (game.level >= 2 && Math.random() < 0.10) {
+  veganRespawnTimer = 0;
+  // Vegan always spawns from level 2+
+  if (game.level >= 2) {
     vegan = {
       x: WIDTH / 2 + (Math.random() - 0.5) * 200,
       y: HEIGHT - 50,
       width: 40, height: 50,
-      hp: 3, maxHp: 3,
-      dir: 1, speed: 80,
+      hp: 5, maxHp: 5,
+      dir: 1, speed: 120,
       state: 'patrol',
       blockTimer: 0,
       auraTimer: 0
@@ -3248,43 +3252,47 @@ function update(dt) {
     }
   }
 
-  // --- Vegan Ally Update ---
+  // --- Vegan Ally Update (SUPER ACTIVE DEFENDER) ---
   if (vegan && vegan.state !== 'dead') {
     vegan.auraTimer += dt;
 
-    // Find nearest meat-eating threat near player
+    // Find nearest ANY ground threat (not just carnivore/farmer - ALL enemies!)
     let nearestThreat = null;
-    let nearestDist = 200;
+    let nearestDist = 400;  // wider detection range
     for (const e of groundEnemies) {
-      if (e.type === 'carnivore' || e.type === 'farmer') {
-        const dist = Math.abs(e.x - player.x);
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestThreat = e;
-        }
+      const dist = Math.abs(e.x - player.x);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestThreat = e;
       }
     }
 
     if (nearestThreat) {
       vegan.state = 'defend';
       vegan.dir = nearestThreat.x > vegan.x ? 1 : -1;
-      vegan.x += vegan.speed * 2 * vegan.dir * dt;
-      if (Math.abs(vegan.x - nearestThreat.x) < 30) {
+      vegan.x += vegan.speed * 2.5 * vegan.dir * dt;  // faster charge!
+      if (Math.abs(vegan.x - nearestThreat.x) < 35) {
         vegan.blockTimer -= dt;
         if (vegan.blockTimer <= 0) {
-          vegan.hp--;
-          vegan.blockTimer = 1.5;
+          vegan.blockTimer = 0.8;  // fights faster (was 1.5)
           spawnParticles(vegan.x, vegan.y, '✌️', 3, 80);
+          spawnParticles(nearestThreat.x, nearestThreat.y, '💥', 2, 60);
           const idx = groundEnemies.indexOf(nearestThreat);
           if (idx >= 0) groundEnemies.splice(idx, 1);
+          // Only loses HP against wolves and carnivores (tough enemies)
+          if (nearestThreat.type === 'wolf' || nearestThreat.type === 'carnivore') {
+            vegan.hp--;
+            spawnScorePopup(vegan.x, vegan.y - 20, '💚 -1', '#66cc66');
+          }
           if (vegan.hp <= 0) killVegan('enemy');
         }
       }
     } else {
+      // Actively patrol near player (closer, more protective)
       vegan.state = 'patrol';
-      const targetX = player.x + Math.sin(Date.now() / 1000) * 100;
+      const targetX = player.x + Math.sin(Date.now() / 800) * 80;
       vegan.dir = targetX > vegan.x ? 1 : -1;
-      vegan.x += vegan.speed * vegan.dir * dt;
+      vegan.x += vegan.speed * 1.5 * vegan.dir * dt;
     }
 
     if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
@@ -3297,12 +3305,15 @@ function update(dt) {
       }
     }
 
-    // Bomb/devil collision from falling objects
+    // Bomb/devil collision from falling objects - costs HP but doesn't insta-kill
     for (let i = objects.length - 1; i >= 0; i--) {
       const obj = objects[i];
       if (vegan && (obj.type === 'bomb' || obj.type === 'devil') && aabb(vegan, obj)) {
-        killVegan(obj.type === 'bomb' ? 'bomb' : 'devil');
+        vegan.hp -= 2;
         objects.splice(i, 1);
+        spawnParticles(vegan.x, vegan.y, '💔', 3, 80);
+        spawnScorePopup(vegan.x, vegan.y - 20, '💚 -2', '#cc6666');
+        if (vegan.hp <= 0) killVegan(obj.type === 'bomb' ? 'bomb' : 'devil');
         break;
       }
     }
@@ -3316,6 +3327,27 @@ function update(dt) {
     veganDeathAnim.haloSize = Math.min(1, veganDeathAnim.haloSize + dt * 1.5);
     veganDeathAnim.opacity = Math.max(0, veganDeathAnim.timer / 2.0);
     if (veganDeathAnim.timer <= 0) veganDeathAnim = null;
+  }
+
+  // Vegan respawn: if dead, try again after 12 seconds
+  if (!vegan && !veganDeathAnim && game.level >= 2) {
+    veganRespawnTimer += dt;
+    if (veganRespawnTimer >= 12) {
+      veganRespawnTimer = 0;
+      const fromLeft = Math.random() > 0.5;
+      vegan = {
+        x: fromLeft ? 40 : WIDTH - 40,
+        y: HEIGHT - 50,
+        width: 40, height: 50,
+        hp: 5, maxHp: 5,
+        dir: fromLeft ? 1 : -1, speed: 120,
+        state: 'patrol',
+        blockTimer: 0,
+        auraTimer: 0
+      };
+      spawnParticles(vegan.x, vegan.y, '🌿', 5, 100);
+      spawnScorePopup(vegan.x, vegan.y - 30, 'Vegan se vratio! 🌱', '#44cc44');
+    }
   }
 }
 
@@ -3333,6 +3365,7 @@ function killVegan(cause) {
     opacity: 1.0
   };
   vegan = null;
+  veganRespawnTimer = 0;  // reset respawn timer
   playVeganDeathSound();
   spawnParticles(veganDeathAnim.x, veganDeathAnim.y, '\u{1F607}', 5, 100);
 }
@@ -3815,6 +3848,166 @@ function drawFarmerSprite(x, y, dir, animTimer) {
   ctx.moveTo(18, -45);
   ctx.lineTo(18, -52);
   ctx.stroke();
+
+  ctx.restore();
+}
+
+// --- Hand-drawn Carnivore (meat-eating man with fork & knife) ---
+function drawCarnivoreSprite(x, y, dir, animTimer) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const walkPhase = animTimer * 6;
+  const chompPhase = Math.sin(animTimer * 8);
+
+  // Legs - dark pants
+  ctx.fillStyle = '#333';
+  const l1 = Math.sin(walkPhase) * 6;
+  const l2 = Math.sin(walkPhase + Math.PI) * 6;
+  ctx.fillRect(-7 + l1, 8, 7, 20);
+  ctx.fillRect(2 + l2, 8, 7, 20);
+  // Shoes
+  ctx.fillStyle = '#222';
+  ctx.fillRect(-8 + l1, 26, 9, 5);
+  ctx.fillRect(1 + l2, 26, 9, 5);
+
+  // Body - blood-stained apron over dark shirt
+  ctx.fillStyle = '#444';
+  ctx.fillRect(-11, -14, 24, 24);
+  // White apron
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(-8, -8, 18, 18);
+  // Blood stains on apron
+  ctx.fillStyle = '#cc2222';
+  ctx.beginPath();
+  ctx.arc(-2, -2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 7, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Arms
+  ctx.fillStyle = '#FDBCB4';
+  // Left arm holding fork
+  ctx.save();
+  ctx.translate(-14, -8);
+  ctx.rotate(Math.sin(animTimer * 4) * 0.15);
+  ctx.fillRect(0, 0, 5, 16);
+  // Fork in hand
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.lineTo(2, -18);
+  ctx.stroke();
+  // Fork prongs
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -18); ctx.lineTo(0, -24);
+  ctx.moveTo(2, -18); ctx.lineTo(2, -24);
+  ctx.moveTo(4, -18); ctx.lineTo(4, -24);
+  ctx.stroke();
+  ctx.restore();
+
+  // Right arm holding knife
+  ctx.save();
+  ctx.translate(13, -8);
+  ctx.rotate(chompPhase * 0.3);  // chopping motion
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(0, 0, 5, 16);
+  // Knife
+  ctx.fillStyle = '#bbb';
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.lineTo(4, -20);
+  ctx.lineTo(0, -20);
+  ctx.closePath();
+  ctx.fill();
+  // Knife handle
+  ctx.fillStyle = '#654321';
+  ctx.fillRect(0, -2, 4, 6);
+  ctx.restore();
+
+  // Head - red/angry face
+  ctx.fillStyle = '#FDBCB4';
+  ctx.beginPath();
+  ctx.arc(1, -22, 11, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Greasy hair
+  ctx.fillStyle = '#3a2a1a';
+  ctx.beginPath();
+  ctx.ellipse(1, -30, 12, 7, 0, Math.PI, 0);
+  ctx.fill();
+
+  // Angry red cheeks
+  ctx.fillStyle = 'rgba(255,80,80,0.4)';
+  ctx.beginPath();
+  ctx.arc(-6, -18, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(8, -18, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Beady eyes - greedy
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-3, -23, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, -23, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Evil glint
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(-2, -24, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(6, -24, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Angry eyebrows
+  ctx.strokeStyle = '#3a2a1a';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-7, -28);
+  ctx.lineTo(-1, -26);
+  ctx.moveTo(3, -26);
+  ctx.lineTo(9, -28);
+  ctx.stroke();
+
+  // Mouth - chomping
+  ctx.fillStyle = '#000';
+  const mouthOpen = Math.max(0, chompPhase) * 4;
+  ctx.beginPath();
+  ctx.ellipse(1, -16, 5, 1 + mouthOpen, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Teeth when mouth open
+  if (mouthOpen > 1) {
+    ctx.fillStyle = '#fff';
+    for (let t = -3; t <= 3; t += 2) {
+      ctx.fillRect(t, -17, 1.5, 2);
+    }
+  }
+
+  // Thought bubble with meat emoji (he's thinking about pork!)
+  if (Math.sin(animTimer * 2) > 0.5) {
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🍖', 18, -38);
+    // Small bubbles
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(14, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(16, -34, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   ctx.restore();
 }
@@ -5532,10 +5725,12 @@ function drawPlayingScene() {
   for (const e of groundEnemies) {
     if (e.type === 'wolf') {
       drawWolf(e.x, e.y, e.dir, e.animTimer);
+    } else if (e.type === 'carnivore') {
+      drawCarnivoreSprite(e.x, e.y, e.dir, e.animTimer);
     } else if (e.type === 'farmer') {
       drawFarmerSprite(e.x, e.y, e.dir, e.animTimer);
     } else {
-      // Fox and carnivore keep emoji for now
+      // Fox keeps emoji for now
       ctx.save();
       ctx.translate(e.x, e.y);
       if (e.dir < 0) ctx.scale(-1, 1);
