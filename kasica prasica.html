@@ -286,6 +286,10 @@ const POOP_DURATION = 10;
 let isPooping = false;
 let poopAnimTimer = 0;
 
+// --- Vegan Ally ---
+let vegan = null;
+let veganDeathAnim = null;
+
 // --- Particle System ---
 const particles = [];
 const MAX_PARTICLES = 100;
@@ -1830,6 +1834,20 @@ function startLevel() {
   poopCooldown = 0;
   isPooping = false;
   poopAnimTimer = 0;
+  vegan = null;
+  veganDeathAnim = null;
+  if (game.level >= 2 && Math.random() < 0.10) {
+    vegan = {
+      x: WIDTH / 2 + (Math.random() - 0.5) * 200,
+      y: HEIGHT - 50,
+      width: 40, height: 50,
+      hp: 3, maxHp: 3,
+      dir: 1, speed: 80,
+      state: 'patrol',
+      blockTimer: 0,
+      auraTimer: 0
+    };
+  }
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
@@ -2828,6 +2846,114 @@ function update(dt) {
       }
     }
   }
+
+  // --- Vegan Ally Update ---
+  if (vegan && vegan.state !== 'dead') {
+    vegan.auraTimer += dt;
+
+    // Find nearest meat-eating threat near player
+    let nearestThreat = null;
+    let nearestDist = 200;
+    for (const e of groundEnemies) {
+      if (e.type === 'carnivore' || e.type === 'farmer') {
+        const dist = Math.abs(e.x - player.x);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestThreat = e;
+        }
+      }
+    }
+
+    if (nearestThreat) {
+      vegan.state = 'defend';
+      vegan.dir = nearestThreat.x > vegan.x ? 1 : -1;
+      vegan.x += vegan.speed * 2 * vegan.dir * dt;
+      if (Math.abs(vegan.x - nearestThreat.x) < 30) {
+        vegan.blockTimer -= dt;
+        if (vegan.blockTimer <= 0) {
+          vegan.hp--;
+          vegan.blockTimer = 1.5;
+          spawnParticles(vegan.x, vegan.y, '✌️', 3, 80);
+          const idx = groundEnemies.indexOf(nearestThreat);
+          if (idx >= 0) groundEnemies.splice(idx, 1);
+          if (vegan.hp <= 0) killVegan('enemy');
+        }
+      }
+    } else {
+      vegan.state = 'patrol';
+      const targetX = player.x + Math.sin(Date.now() / 1000) * 100;
+      vegan.dir = targetX > vegan.x ? 1 : -1;
+      vegan.x += vegan.speed * vegan.dir * dt;
+    }
+
+    if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
+
+    // Poop collision - kills vegan!
+    for (const poop of poops) {
+      if (vegan && aabb(vegan, poop)) {
+        killVegan('poop');
+        break;
+      }
+    }
+
+    // Bomb/devil collision from falling objects
+    for (let i = objects.length - 1; i >= 0; i--) {
+      const obj = objects[i];
+      if (vegan && (obj.type === 'bomb' || obj.type === 'devil') && aabb(vegan, obj)) {
+        killVegan(obj.type === 'bomb' ? 'bomb' : 'devil');
+        objects.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  // Vegan death animation update
+  if (veganDeathAnim) {
+    veganDeathAnim.timer -= dt;
+    veganDeathAnim.y -= 40 * dt;
+    veganDeathAnim.wingSpread = Math.min(1, veganDeathAnim.wingSpread + dt * 2);
+    veganDeathAnim.haloSize = Math.min(1, veganDeathAnim.haloSize + dt * 1.5);
+    veganDeathAnim.opacity = Math.max(0, veganDeathAnim.timer / 2.0);
+    if (veganDeathAnim.timer <= 0) veganDeathAnim = null;
+  }
+}
+
+function killVegan(cause) {
+  if (!vegan) return;
+  const msg = cause === 'poop'
+    ? 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}'
+    : 'O ne, ubio si vegana! \u{1F607}';
+  veganDeathAnim = {
+    x: vegan.x, y: vegan.y,
+    timer: 4.0,
+    msg: msg,
+    wingSpread: 0,
+    haloSize: 0,
+    opacity: 1.0
+  };
+  vegan = null;
+  playVeganDeathSound();
+  spawnParticles(veganDeathAnim.x, veganDeathAnim.y, '\u{1F607}', 5, 100);
+}
+
+function playVeganDeathSound() {
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+    // Sad minor chord progression
+    [261, 311, 370].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, now + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 2.0 + i * 0.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.2);
+      osc.stop(now + 2.5);
+    });
+  } catch(e) {}
 }
 
 // --- Draw ---
@@ -4308,6 +4434,96 @@ function drawPlayingScene() {
     ctx.textBaseline = 'middle';
     ctx.fillText(e.emoji, 0, bob);
     ctx.restore();
+  }
+
+  // Draw vegan ally
+  if (vegan && vegan.state !== 'dead') {
+    ctx.save();
+    ctx.translate(vegan.x, vegan.y);
+
+    // Green aura
+    const auraAlpha = Math.sin(vegan.auraTimer * 3) * 0.15 + 0.2;
+    ctx.fillStyle = `rgba(100, 220, 100, ${auraAlpha})`;
+    ctx.beginPath();
+    ctx.arc(0, -5, 30, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vegan emoji
+    if (vegan.dir < 0) ctx.scale(-1, 1);
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F9D1}\u200D\u{1F33E}', 0, 0);
+
+    // "VEGAN" label
+    ctx.scale(vegan.dir < 0 ? -1 : 1, 1);
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillText('VEGAN', 0, -30);
+
+    // HP bar
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(-15, -40, 30, 5);
+    ctx.fillStyle = vegan.hp > 1 ? '#4CAF50' : '#ff4444';
+    ctx.fillRect(-15, -40, 30 * (vegan.hp / vegan.maxHp), 5);
+
+    ctx.restore();
+  }
+
+  // Draw vegan death animation
+  if (veganDeathAnim) {
+    const da = veganDeathAnim;
+    ctx.save();
+    ctx.globalAlpha = da.opacity;
+    ctx.translate(da.x, da.y);
+
+    // Halo
+    if (da.haloSize > 0) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, -35, 15 * da.haloSize, 5 * da.haloSize, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Angel wings
+    if (da.wingSpread > 0) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-5, -10);
+      ctx.quadraticCurveTo(-30 * da.wingSpread, -30, -40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(-25 * da.wingSpread, 0, -5, 5);
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(5, -10);
+      ctx.quadraticCurveTo(30 * da.wingSpread, -30, 40 * da.wingSpread, -5);
+      ctx.quadraticCurveTo(25 * da.wingSpread, 0, 5, 5);
+      ctx.fill();
+    }
+
+    // Vegan emoji rising
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F607}', 0, 0);
+
+    ctx.restore();
+
+    // Message text
+    if (da.timer > 1.0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (da.timer - 1) / 1.0);
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.strokeText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText(da.msg, WIDTH / 2, HEIGHT / 2 - 50);
+      ctx.restore();
+    }
   }
 
   // Draw poops with stink waves
