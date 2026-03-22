@@ -2658,24 +2658,22 @@ function recalcZonesFromTouches() {
 }
 
 // Canvas touch handlers for zone-based controls
+// On non-playing screens, touch = tap = advance/click
+// On playing screen, touch = zone-based controls with multi-touch
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   unlockAudio();
 
-  if (game.screen !== 'playing') {
-    // Menu screens: simulate click
-    canvas.dispatchEvent(new MouseEvent('click'));
-    return;
+  // During gameplay: zone-based controls
+  if (game.screen === 'playing' && isMobile) {
+    for (const touch of e.changedTouches) {
+      const pt = touchToCanvas(touch);
+      const zone = getZoneAtPoint(pt.x, pt.y);
+      canvasTouches[touch.identifier] = zone ? zone.id : null;
+    }
+    recalcZonesFromTouches();
   }
-
-  if (!isMobile) return;
-
-  for (const touch of e.changedTouches) {
-    const pt = touchToCanvas(touch);
-    const zone = getZoneAtPoint(pt.x, pt.y);
-    canvasTouches[touch.identifier] = zone ? zone.id : null;
-  }
-  recalcZonesFromTouches();
+  // Non-playing screens: don't do anything on touchstart (wait for touchend = "tap")
 }, { passive: false });
 
 canvas.addEventListener('touchmove', (e) => {
@@ -2692,6 +2690,15 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
+
+  // Non-playing screens: tap = click to advance
+  if (game.screen !== 'playing') {
+    // Fire the click handler directly for menu navigation
+    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+    canvas.dispatchEvent(clickEvent);
+    return;
+  }
+
   if (!isMobile) return;
 
   for (const touch of e.changedTouches) {
@@ -4951,12 +4958,27 @@ function drawShop() {
     item._rect = { x: x + 20, y: y + 125, w: cardW - 40, h: 28 };
   }
 
-  // Skip button
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillStyle = '#4CAF50';
-  var skipY = HEIGHT - 60;
-  ctx.fillText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY);
-  shopSkipRect = { x: WIDTH / 2 - 150, y: skipY - 20, w: 300, h: 35 };
+  // Skip button - BIG TAP BUTTON for mobile
+  var skipBtnW = isMobile ? 450 : 300;
+  var skipBtnH = isMobile ? 70 : 40;
+  var skipBtnX = WIDTH / 2 - skipBtnW / 2;
+  var skipY = HEIGHT - (isMobile ? 100 : 65);
+  var skipPulse = 0.7 + 0.3 * Math.abs(Math.sin(Date.now() / 400));
+  ctx.fillStyle = `rgba(76, 175, 80, ${0.3 + skipPulse * 0.2})`;
+  ctx.strokeStyle = `rgba(76, 255, 80, ${0.4 + skipPulse * 0.3})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(skipBtnX, skipY, skipBtnW, skipBtnH, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = `bold ${isMobile ? 28 : 20}px sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.strokeText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY + skipBtnH / 2);
+  ctx.fillText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY + skipBtnH / 2);
+  ctx.lineWidth = 1;
+  shopSkipRect = { x: skipBtnX, y: skipY, w: skipBtnW, h: skipBtnH };
 
   // Active power-ups display
   ctx.font = '14px sans-serif';
@@ -6028,13 +6050,26 @@ function drawTitle() {
     ctx.fillText('Igra\u010D: ' + playerName, WIDTH / 2, HEIGHT / 2 + 40);
   }
 
-  // Start prompt (pulsing)
+  // Start prompt - BIG TAP BUTTON
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
-  ctx.globalAlpha = pulse;
-  ctx.font = 'bold 26px sans-serif';
-  ctx.fillStyle = '#333';
-  ctx.fillText('Klikni ili pritisni SPACE', WIDTH / 2, HEIGHT / 2 + 70);
-  ctx.globalAlpha = 1.0;
+  const btnW = isMobile ? 450 : 320;
+  const btnH = isMobile ? 80 : 50;
+  const btnX = WIDTH / 2 - btnW / 2;
+  const btnY = HEIGHT / 2 + (isMobile ? 45 : 50);
+  ctx.fillStyle = `rgba(50, 200, 50, ${0.25 + pulse * 0.25})`;
+  ctx.strokeStyle = `rgba(50, 255, 50, ${0.4 + pulse * 0.4})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(btnX, btnY, btnW, btnH, 15);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = `bold ${isMobile ? 34 : 26}px sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(isMobile ? '\uD83D\uDC46 IGRAJ!' : 'Klikni ili pritisni SPACE', WIDTH / 2, btnY + btnH / 2);
+  ctx.fillText(isMobile ? '\uD83D\uDC46 IGRAJ!' : 'Klikni ili pritisni SPACE', WIDTH / 2, btnY + btnH / 2);
+  ctx.lineWidth = 1;
 
   // Leaderboard
   var lb = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
@@ -6992,13 +7027,28 @@ function drawLevelComplete() {
   ctx.fillStyle = '#444';
   ctx.fillText('\u{1FA99} Score: ' + game.score + '   \u20BF ' + playerBTC, WIDTH / 2, HEIGHT - 80);
 
-  // Next level prompt - now goes to shop
+  // Next level prompt - BIG TAP BUTTON for mobile
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
-  ctx.globalAlpha = pulse;
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillStyle = '#333';
-  ctx.fillText('Klikni za Shop \uD83C\uDFEA', WIDTH / 2, HEIGHT - 40);
-  ctx.globalAlpha = 1.0;
+  const btnW = isMobile ? 400 : 300;
+  const btnH = isMobile ? 80 : 50;
+  const btnX = WIDTH / 2 - btnW / 2;
+  const btnY = HEIGHT - (isMobile ? 120 : 70);
+  // Button background
+  ctx.fillStyle = `rgba(255, 215, 0, ${0.3 + pulse * 0.3})`;
+  ctx.strokeStyle = `rgba(255, 215, 0, ${0.5 + pulse * 0.4})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(btnX, btnY, btnW, btnH, 15);
+  ctx.fill();
+  ctx.stroke();
+  // Button text
+  ctx.font = `bold ${isMobile ? 32 : 22}px sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText('\uD83D\uDC46 Dalje - Shop \uD83C\uDFEA', WIDTH / 2, btnY + btnH / 2);
+  ctx.fillText('\uD83D\uDC46 Dalje - Shop \uD83C\uDFEA', WIDTH / 2, btnY + btnH / 2);
+  ctx.lineWidth = 1;
 }
 
 function drawGameOver() {
@@ -7292,15 +7342,28 @@ function drawGameOver() {
     ctx.restore();
   }
 
-  // Restart prompt (only when resurrection sequence is done)
+  // Restart prompt - BIG TAP BUTTON (only when resurrection sequence is done)
   if (resurrectionState === 'done') {
     const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
-    ctx.globalAlpha = pulse;
-    ctx.font = 'bold 22px sans-serif';
-    ctx.fillStyle = '#ffcc66';
+    const btnW = isMobile ? 420 : 300;
+    const btnH = isMobile ? 80 : 50;
+    const btnX = WIDTH / 2 - btnW / 2;
+    const btnY = HEIGHT - (isMobile ? 120 : 70);
+    ctx.fillStyle = `rgba(255, 100, 50, ${0.3 + pulse * 0.3})`;
+    ctx.strokeStyle = `rgba(255, 150, 50, ${0.5 + pulse * 0.4})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 15);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `bold ${isMobile ? 32 : 22}px sans-serif`;
+    ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.fillText('Klikni za novu igru', WIDTH / 2, HEIGHT - 20);
-    ctx.globalAlpha = 1.0;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText('\uD83D\uDC46 Nova igra', WIDTH / 2, btnY + btnH / 2);
+    ctx.fillText('\uD83D\uDC46 Nova igra', WIDTH / 2, btnY + btnH / 2);
+    ctx.lineWidth = 1;
   }
 }
 
