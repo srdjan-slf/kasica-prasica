@@ -738,18 +738,29 @@ function getAudioContext() {
 // Unlock audio on ANY user interaction (click, touch, key)
 function unlockAudio() {
   if (audioUnlocked) return;
-  const ctx = getAudioContext();
-  if (ctx.state === 'suspended') ctx.resume();
-  // Play a silent buffer to fully unlock
-  const buf = ctx.createBuffer(1, 1, 22050);
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.connect(ctx.destination);
-  src.start(0);
-  audioUnlocked = true;
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') ctx.resume();
+    // Play a silent buffer to fully unlock
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    audioUnlocked = true;
+    // If game is already playing but music hasn't started, start it now
+    if (game.screen === 'playing' && !musicPlaying) {
+      startMusic();
+    }
+    // If on intro screen, start intro music
+    if (game.screen === 'intro') {
+      forceRestartIntroMusic();
+    }
+  } catch(e) {}
 }
-document.addEventListener('click', unlockAudio);
-document.addEventListener('touchstart', unlockAudio);
+document.addEventListener('click', unlockAudio, { passive: true });
+document.addEventListener('touchstart', unlockAudio, { passive: true });
+document.addEventListener('touchend', unlockAudio, { passive: true });
 document.addEventListener('keydown', unlockAudio, { once: false });
 
 // --- Intro Scene Music ---
@@ -1703,6 +1714,11 @@ function playDoubleOink() {
 
 function startMusic() {
   if (musicPlaying) return;
+  // Ensure audio context is active
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') ctx.resume();
+  } catch(e) {}
   musicPlaying = true;
   beatCount = 0;
   beatTimer = 0;
