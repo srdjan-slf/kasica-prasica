@@ -239,6 +239,17 @@ let spawnTimer = 0;
 let flashTimer = 0;
 let flashColor = '#ff0000';
 
+// --- Ground Enemies ---
+const groundEnemies = [];
+let groundEnemySpawnTimer = 0;
+
+const GROUND_ENEMY_TYPES = {
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 350, ai: 'straight', fromLevel: 3, size: 44 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 200, ai: 'chase', fromLevel: 4, size: 40 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 280, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 150, ai: 'relentless', fromLevel: 6, size: 42 }
+};
+
 // --- Shake Mechanic ---
 let lastShakeKey = null;
 let shakeVisualOffset = 0;
@@ -1762,6 +1773,8 @@ function startLevel() {
   lightningBolts.length = 0;
   lightningWarning = null;
   lightningSpawnTimer = 5;
+  groundEnemies.length = 0;
+  groundEnemySpawnTimer = 3;
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   player.x = WIDTH / 2;
@@ -2633,6 +2646,79 @@ function update(dt) {
       }
 
       if (bolt.life <= 0) lightningBolts.splice(i, 1);
+    }
+  }
+
+  // --- Ground Enemies ---
+  if (game.level >= 3) {
+    groundEnemySpawnTimer -= dt;
+    if (groundEnemySpawnTimer <= 0) {
+      groundEnemySpawnTimer = Math.max(1.5, 4 - game.level * 0.3);
+      const available = Object.entries(GROUND_ENEMY_TYPES)
+        .filter(([_, t]) => game.level >= t.fromLevel);
+      const [key, type] = available[Math.floor(Math.random() * available.length)];
+      const fromLeft = Math.random() > 0.5;
+      groundEnemies.push({
+        type: key,
+        emoji: type.emoji,
+        x: fromLeft ? -30 : WIDTH + 30,
+        y: HEIGHT - 45,
+        width: type.size,
+        height: type.size,
+        speed: type.speed,
+        dir: fromLeft ? 1 : -1,
+        ai: type.ai,
+        pauseTimer: 0,
+        animTimer: 0
+      });
+    }
+  }
+
+  for (let i = groundEnemies.length - 1; i >= 0; i--) {
+    const e = groundEnemies[i];
+    e.animTimer += dt;
+
+    switch (e.ai) {
+      case 'straight':
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'chase':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'cunning':
+        if (e.pauseTimer > 0) {
+          e.pauseTimer -= dt;
+        } else {
+          e.x += e.speed * e.dir * dt;
+          if (Math.random() < 0.005) {
+            e.pauseTimer = 0.3 + Math.random() * 0.5;
+            e.dir *= -1;
+          }
+        }
+        break;
+      case 'relentless':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+    }
+
+    // Remove if off-screen (only for straight runners, others stay)
+    if (e.ai === 'straight' && (e.x < -80 || e.x > WIDTH + 80)) {
+      groundEnemies.splice(i, 1);
+      continue;
+    }
+    // Clamp chase/relentless/cunning enemies to screen bounds
+    if (e.ai !== 'straight') {
+      e.x = Math.max(-20, Math.min(WIDTH + 20, e.x));
+    }
+
+    // Collision with player - ONLY if player is on or near ground level
+    // (player can jump OVER them)
+    if (player.grounded && aabb(player, e)) {
+      triggerDamage(false);
+      groundEnemies.splice(i, 1);
+      spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
     }
   }
 }
@@ -4064,6 +4150,21 @@ function drawPlayingScene() {
       ctx.font = '32px sans-serif';
       ctx.fillText(obj.emoji || '', obj.x, obj.y);
     }
+  }
+
+  // Ground enemies
+  for (const e of groundEnemies) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    // Flip emoji based on direction
+    if (e.dir < 0) ctx.scale(-1, 1);
+    // Bobbing animation
+    const bob = Math.sin(e.animTimer * 8) * 3;
+    ctx.font = `${e.width}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.emoji, 0, bob);
+    ctx.restore();
   }
 
   // Player (piggy with visual states)
