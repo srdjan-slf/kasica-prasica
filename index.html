@@ -2572,22 +2572,23 @@ const MARGIN = Math.floor(WIDTH * 0.05);  // 5% width gap between main and actio
 // Main directional buttons (LEVO / DESNO) - 40% taller
 const DIR_W = 140;
 const DIR_H = 140;   // 100 * 1.4 = 140
-const DIR_Y = HEIGHT - PAD - DIR_H;  // same Y for both = same level
+// Center vertically: middle of screen
+const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);
 
 // Action buttons glued next to directional, fill remaining vertical space
 const ACT_W = 130;   // action button width
-// SKOK sits above LEVO, glued with MARGIN gap from right edge of LEVO
+// SKOK sits next to LEVO, glued with MARGIN gap
 const JUMP_X = PAD + DIR_W + MARGIN;
 const JUMP_H = DIR_H;  // same height as directional
 const JUMP_Y = DIR_Y;  // same level
 
-// SERI sits above DESNO
+// SERI sits next to DESNO, top half
 const POOP_X = WIDTH - PAD - DIR_W - MARGIN - ACT_W;
-const POOP_H = Math.floor((DIR_H - 8) / 2);  // half of dir height minus small gap
+const POOP_H = Math.floor((DIR_H - 8) / 2);
 const POOP_Y = DIR_Y;
 
-// PRDNI sits below SERI (still next to DESNO)
-const FART_H = DIR_H - POOP_H - 8;  // fill remaining space
+// PRDNI sits below SERI
+const FART_H = DIR_H - POOP_H - 8;
 const FART_Y = POOP_Y + POOP_H + 8;
 
 const mobileZones = [
