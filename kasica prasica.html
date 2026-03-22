@@ -143,6 +143,7 @@ const player = {
 const objects = [];
 let spawnTimer = 0;
 let flashTimer = 0;
+let flashColor = '#ff0000';
 
 // --- Shake Mechanic ---
 let lastShakeKey = null;
@@ -889,6 +890,12 @@ function lightenColor(hex, amount) {
   return 'rgb(' + r + ',' + g + ',' + b + ')';
 }
 
+// --- Special item types (emoji-based, rarer, higher value) ---
+const SPECIAL_TYPES = [
+  { type: 'bill', emoji: '💵', value: 20, size: 42 },
+  { type: 'moneybag', emoji: '💰', value: 30, size: 48 }
+];
+
 function pickCoinType() {
   if (!game.levelConfig) return COIN_TYPES[0];
   const cfg = game.levelConfig;
@@ -914,6 +921,41 @@ function spawnObject() {
       speed: fallSpeed * 1.6,
       emoji: '\u{1F4A3}',
       value: 0
+    });
+    return;
+  }
+
+  // Rare special items: bill (💵 +20) and moneybag (💰 +30)
+  const lvl = game.level || 1;
+  const specialRoll = Math.random();
+  const moneybagChance = lvl >= 3 ? Math.min(0.04, 0.01 + lvl * 0.004) : 0;
+  const billChanceSpecial = lvl >= 2 ? Math.min(0.08, 0.03 + lvl * 0.006) : 0;
+
+  if (specialRoll < moneybagChance) {
+    const sp = SPECIAL_TYPES[1]; // moneybag
+    objects.push({
+      type: 'special',
+      specialType: sp,
+      x: Math.random() * (WIDTH - sp.size) + sp.size / 2,
+      y: -sp.size / 2,
+      width: sp.size, height: sp.size,
+      speed: fallSpeed * 0.7, // falls slower - it's heavy!
+      emoji: sp.emoji,
+      value: sp.value
+    });
+    return;
+  }
+  if (specialRoll < moneybagChance + billChanceSpecial) {
+    const sp = SPECIAL_TYPES[0]; // bill
+    objects.push({
+      type: 'special',
+      specialType: sp,
+      x: Math.random() * (WIDTH - sp.size) + sp.size / 2,
+      y: -sp.size / 2,
+      width: sp.size, height: sp.size,
+      speed: fallSpeed * 0.85, // floats a bit
+      emoji: sp.emoji,
+      value: sp.value
     });
     return;
   }
@@ -1105,6 +1147,7 @@ function triggerDamage(fromBomb) {
   game.cracks++;
   game.score = Math.max(0, game.score - 5);
   flashTimer = 0.3;
+  flashColor = '#ff0000';
   piggyDamageTimer = 0.3;
   spawnScorePopup(player.x, player.y - 40, '-5', '#ff4444');
 
@@ -1468,6 +1511,19 @@ function update(dt) {
           spawnParticles(obj.x, obj.y, '\u2728', 5, 180);
           spawnScorePopup(obj.x, obj.y - 10, '+10', '#ffd700');
           playGoldCollect();
+        } else if (obj.value === 20) {
+          spawnParticles(obj.x, obj.y, '\u{1F4B5}', 4, 200);
+          spawnParticles(obj.x, obj.y, '\u2728', 5, 160);
+          spawnScorePopup(obj.x, obj.y - 10, '+20', '#22cc55');
+          playGoldCollect();
+        } else if (obj.value === 30) {
+          spawnParticles(obj.x, obj.y, '\u{1F4B0}', 3, 200);
+          spawnParticles(obj.x, obj.y, '\u2728', 8, 220);
+          spawnScorePopup(obj.x, obj.y - 10, '+30', '#ff6600');
+          playGoldCollect();
+          // Extra flash for moneybag!
+          flashTimer = 0.15;
+          flashColor = 'rgba(255,215,0,';
         }
 
         objects.splice(i, 1);
@@ -1746,6 +1802,18 @@ function drawPlayingScene() {
     if (obj.type === 'coin' && obj.coinType) {
       // Draw custom coin graphics
       drawCoin(obj.x, obj.y, obj.width, obj.coinType, now);
+    } else if (obj.type === 'special') {
+      // Bills and moneybags - emoji with golden glow
+      const sz = obj.width || 42;
+      ctx.font = sz + 'px sans-serif';
+      // Glowing aura
+      const glowPulse = 12 + 6 * Math.sin(now * 6 + obj.x);
+      ctx.shadowColor = obj.value >= 30 ? '#ff8800' : '#44cc44';
+      ctx.shadowBlur = glowPulse;
+      // Slight floating bob
+      const bob = Math.sin(now * 3 + obj.x * 0.05) * 3;
+      ctx.fillText(obj.emoji, obj.x, obj.y + bob);
+      ctx.shadowBlur = 0;
     } else if (obj.type === 'bomb') {
       ctx.font = '36px sans-serif';
       // Pulsing glow on bombs
@@ -1901,10 +1969,10 @@ function drawPlayingScene() {
     ctx.globalAlpha = 1.0;
   }
 
-  // Red flash overlay
+  // Flash overlay (red for damage, gold for moneybag)
   if (flashTimer > 0) {
     ctx.globalAlpha = flashTimer / 0.3 * 0.4;
-    ctx.fillStyle = '#ff0000';
+    ctx.fillStyle = flashColor || '#ff0000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.globalAlpha = 1.0;
   }
