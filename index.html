@@ -240,7 +240,7 @@ function getLevelConfig(level) {
     duration = 30;
     fallSpeed = 154;
     spawnRate = 0.65;
-    devilCount = 5;
+    devilCount = 3;
     bombChance = 0.12;
     billChance = 0.10;
     goldChance = 0.03;
@@ -248,7 +248,7 @@ function getLevelConfig(level) {
     duration = 35;
     fallSpeed = 189;
     spawnRate = 0.52;
-    devilCount = 8;
+    devilCount = 6;
     bombChance = 0.18;
     billChance = 0.15;
     goldChance = 0.05;
@@ -256,7 +256,7 @@ function getLevelConfig(level) {
     duration = 35;
     fallSpeed = 224;
     spawnRate = 0.455;
-    devilCount = 12;
+    devilCount = 9;
     bombChance = 0.22;
     billChance = 0.20;
     goldChance = 0.07;
@@ -264,7 +264,7 @@ function getLevelConfig(level) {
     duration = 40;
     fallSpeed = 259;
     spawnRate = 0.364;
-    devilCount = 16;
+    devilCount = 12;
     bombChance = 0.28;
     billChance = 0.20;
     goldChance = 0.08;
@@ -272,7 +272,7 @@ function getLevelConfig(level) {
     duration = 40;
     fallSpeed = 294;
     spawnRate = 0.286;
-    devilCount = 20;
+    devilCount = 15;
     bombChance = 0.32;
     billChance = 0.25;
     goldChance = 0.10;
@@ -280,7 +280,7 @@ function getLevelConfig(level) {
     duration = 45;
     fallSpeed = 329;
     spawnRate = 0.234;
-    devilCount = 25;
+    devilCount = 18;
     bombChance = 0.35;
     billChance = 0.25;
     goldChance = 0.10;
@@ -288,7 +288,7 @@ function getLevelConfig(level) {
     duration = 45;
     fallSpeed = 364;
     spawnRate = 0.195;
-    devilCount = 30;
+    devilCount = 22;
     bombChance = 0.38;
     billChance = 0.25;
     goldChance = 0.12;
@@ -297,7 +297,7 @@ function getLevelConfig(level) {
     duration = 40 + level * 3;
     fallSpeed = (480 + level * 35) * 0.7;
     spawnRate = Math.max(0.13, 0.195 - (level - 7) * 0.013);
-    devilCount = 25 + level * 3;
+    devilCount = Math.floor((25 + level * 3) * 0.75);
     bombChance = Math.min(0.50, 0.35 + (level - 7) * 0.03);
     billChance = 0.25;
     goldChance = 0.12;
@@ -432,10 +432,10 @@ const groundEnemies = [];
 let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
-  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 175, ai: 'straight', fromLevel: 3, size: 64 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 140, ai: 'chase', fromLevel: 4, size: 40 },
-  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 196, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 105, ai: 'relentless', fromLevel: 6, size: 42 }
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 88, ai: 'straight', fromLevel: 3, size: 64 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 98, ai: 'chase', fromLevel: 4, size: 40 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 137, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 74, ai: 'relentless', fromLevel: 6, size: 42 }
 };
 
 // --- Shake Mechanic ---
@@ -1820,15 +1820,15 @@ function spawnDevil() {
 
   switch (devilType) {
     case 'fast':
-      emoji = '\u{1F608}'; speed = baseSpeed * 1.4; shakeRequired = 6;
+      emoji = '\u{1F608}'; speed = baseSpeed * 0.98; shakeRequired = 6;
       hammerTimeout = 4; size = 38;
       break;
     case 'heavy':
-      emoji = '\u{1F47F}'; speed = baseSpeed * 0.85; shakeRequired = 14;
+      emoji = '\u{1F47F}'; speed = baseSpeed * 0.595; shakeRequired = 14;
       hammerTimeout = 6; size = 48;
       break;
     case 'thief':
-      emoji = '\u{1F479}'; speed = baseSpeed * 1.1; shakeRequired = 8;
+      emoji = '\u{1F479}'; speed = baseSpeed * 0.77; shakeRequired = 8;
       hammerTimeout = 4; size = 42;
       break;
   }
@@ -1856,7 +1856,7 @@ function spawnButcher() {
   const baseSpeed = cfg ? cfg.fallSpeed * 0.95 : 150;
 
   // Butcher is tough - slower but requires more shakes
-  const speed = baseSpeed * 0.75;
+  const speed = baseSpeed * 0.525;
   const shakeRequired = 10;
   const hammerTimeout = 6; // 6 seconds to shake off
   const size = 50; // bigger than devils
@@ -3146,12 +3146,12 @@ function update(dt) {
   if (game.level >= 3) {
     groundEnemySpawnTimer -= dt;
     if (groundEnemySpawnTimer <= 0) {
-      groundEnemySpawnTimer = Math.max(1.5, 4 - game.level * 0.3);
+      groundEnemySpawnTimer = Math.max(2.0, (4 - game.level * 0.3) * 1.33);
       const available = Object.entries(GROUND_ENEMY_TYPES)
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
       // Wolves spawn half as often — skip and retry soon
-      if (key === 'wolf' && Math.random() < 0.5) {
+      if (key === 'wolf' && Math.random() < 0.7) {
         groundEnemySpawnTimer = 0.5;
       } else {
         const fromLeft = Math.random() > 0.5;
