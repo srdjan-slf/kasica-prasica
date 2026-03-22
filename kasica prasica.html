@@ -3416,97 +3416,225 @@ function drawGround() {
   ctx.globalAlpha = 1.0;
 }
 
-// --- Hand-drawn Wolf ---
+// --- Hand-drawn Wolf (BIG SCARY HEAD with snapping jaws) ---
 function drawWolf(x, y, dir, animTimer) {
   ctx.save();
   ctx.translate(x, y);
   if (dir < 0) ctx.scale(-1, 1);
 
   const legPhase = animTimer * 10;
+  // Jaw snapping - opens and closes rhythmically
+  const jawOpen = Math.abs(Math.sin(animTimer * 6)) * 10;
 
-  // Body - gray oval
-  ctx.fillStyle = '#666';
+  // Body - gray oval, muscular
+  ctx.fillStyle = '#5a5a5a';
   ctx.beginPath();
-  ctx.ellipse(0, -8, 28, 14, 0, 0, Math.PI * 2);
+  ctx.ellipse(-4, -8, 30, 15, 0, 0, Math.PI * 2);
   ctx.fill();
+  // Darker spine
+  ctx.fillStyle = '#444';
+  ctx.beginPath();
+  ctx.ellipse(-4, -14, 26, 7, 0, Math.PI, 0);
+  ctx.fill();
+  // Fur texture lines
+  ctx.strokeStyle = '#4a4a4a';
+  ctx.lineWidth = 1;
+  for (let i = -20; i < 15; i += 6) {
+    ctx.beginPath();
+    ctx.moveTo(i, -18);
+    ctx.lineTo(i + 2, -8);
+    ctx.stroke();
+  }
 
-  // Darker back
+  // Tail - big bushy
   ctx.fillStyle = '#555';
   ctx.beginPath();
-  ctx.ellipse(0, -12, 24, 8, 0, Math.PI, 0);
+  ctx.moveTo(-32, -10);
+  ctx.quadraticCurveTo(-46, -28, -38, -34);
+  ctx.quadraticCurveTo(-30, -28, -30, -12);
   ctx.fill();
-
-  // Head
-  ctx.fillStyle = '#777';
-  ctx.beginPath();
-  ctx.arc(24, -14, 12, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Snout
+  // Tail tip - white
   ctx.fillStyle = '#888';
   ctx.beginPath();
-  ctx.ellipse(34, -12, 7, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Eye - menacing red
-  ctx.fillStyle = '#ff0000';
-  ctx.beginPath();
-  ctx.arc(28, -17, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#000';
-  ctx.beginPath();
-  ctx.arc(28.5, -17, 1.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Ears - pointed
-  ctx.fillStyle = '#555';
-  ctx.beginPath();
-  ctx.moveTo(20, -22);
-  ctx.lineTo(16, -34);
-  ctx.lineTo(24, -24);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(26, -22);
-  ctx.lineTo(24, -33);
-  ctx.lineTo(30, -23);
-  ctx.fill();
-
-  // Teeth
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.moveTo(36, -9);
-  ctx.lineTo(34, -5);
-  ctx.lineTo(38, -5);
-  ctx.fill();
-
-  // Tail - bushy
-  ctx.fillStyle = '#555';
-  ctx.beginPath();
-  ctx.moveTo(-28, -10);
-  ctx.quadraticCurveTo(-38, -25, -32, -28);
-  ctx.quadraticCurveTo(-28, -22, -26, -12);
+  ctx.arc(-37, -32, 5, 0, Math.PI * 2);
   ctx.fill();
 
   // Legs - animated walking
-  ctx.fillStyle = '#555';
-  const frontLeg1 = Math.sin(legPhase) * 8;
-  const frontLeg2 = Math.sin(legPhase + Math.PI) * 8;
-  const backLeg1 = Math.sin(legPhase + Math.PI / 2) * 8;
-  const backLeg2 = Math.sin(legPhase + Math.PI * 1.5) * 8;
-
+  ctx.fillStyle = '#4a4a4a';
+  const fl1 = Math.sin(legPhase) * 9;
+  const fl2 = Math.sin(legPhase + Math.PI) * 9;
+  const bl1 = Math.sin(legPhase + Math.PI / 2) * 9;
+  const bl2 = Math.sin(legPhase + Math.PI * 1.5) * 9;
+  // Back legs (thicker)
+  ctx.fillRect(-16 + bl1, 2, 6, 17);
+  ctx.fillRect(-8 + bl2, 2, 6, 17);
   // Front legs
-  ctx.fillRect(12 + frontLeg1, 2, 5, 16);
-  ctx.fillRect(18 + frontLeg2, 2, 5, 16);
-  // Back legs
-  ctx.fillRect(-14 + backLeg1, 2, 5, 16);
-  ctx.fillRect(-8 + backLeg2, 2, 5, 16);
+  ctx.fillRect(10 + fl1, 2, 6, 17);
+  ctx.fillRect(18 + fl2, 2, 6, 17);
+  // Paws with claws
+  ctx.fillStyle = '#333';
+  ctx.fillRect(9 + fl1, 17, 8, 4);
+  ctx.fillRect(17 + fl2, 17, 8, 4);
+  ctx.fillRect(-17 + bl1, 17, 8, 4);
+  ctx.fillRect(-9 + bl2, 17, 8, 4);
+  // Claws
+  ctx.fillStyle = '#222';
+  [fl1, fl2].forEach((f, i) => {
+    const bx = (i === 0 ? 9 : 17) + f;
+    for (let c = 0; c < 3; c++) {
+      ctx.fillRect(bx + c * 3, 20, 2, 3);
+    }
+  });
 
-  // Paws
+  // === BIG HEAD ===
+  // Head base - much larger
+  ctx.fillStyle = '#6a6a6a';
+  ctx.beginPath();
+  ctx.ellipse(28, -16, 18, 16, -0.1, 0, Math.PI * 2);
+  ctx.fill();
+  // Cheek fur
+  ctx.fillStyle = '#777';
+  ctx.beginPath();
+  ctx.arc(22, -8, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // === SNOUT / JAWS (top jaw fixed, bottom jaw opens) ===
+  // Top jaw / snout
+  ctx.fillStyle = '#7a7a7a';
+  ctx.beginPath();
+  ctx.moveTo(34, -20);
+  ctx.lineTo(52, -14);
+  ctx.lineTo(52, -10);
+  ctx.lineTo(34, -8);
+  ctx.closePath();
+  ctx.fill();
+  // Nose tip
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.ellipse(52, -12, 4, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Nostrils
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.ellipse(53, -13, 1.5, 1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(53, -11, 1.5, 1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Bottom jaw - ANIMATED (opens/closes)
+  ctx.save();
+  ctx.translate(34, -8);
+  ctx.rotate(jawOpen * 0.03);  // jaw opens downward
+  ctx.fillStyle = '#6a6a6a';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(18, -1 + jawOpen * 0.3);
+  ctx.lineTo(16, 4 + jawOpen * 0.5);
+  ctx.lineTo(0, 4);
+  ctx.closePath();
+  ctx.fill();
+  // Bottom teeth - jagged
+  ctx.fillStyle = '#fff';
+  for (let t = 2; t < 16; t += 4) {
+    ctx.beginPath();
+    ctx.moveTo(t, 0);
+    ctx.lineTo(t + 1.5, -4);
+    ctx.lineTo(t + 3, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Top teeth - hanging down from upper jaw, sharp
+  ctx.fillStyle = '#fff';
+  for (let t = 0; t < 5; t++) {
+    const tx = 36 + t * 3.5;
+    const tLen = t === 0 || t === 4 ? 5 : (t === 2 ? 8 : 6); // fangs longer!
+    ctx.beginPath();
+    ctx.moveTo(tx, -8);
+    ctx.lineTo(tx + 1.2, -8 + tLen);
+    ctx.lineTo(tx - 1.2, -8 + tLen);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Extra big fangs
+  ctx.fillStyle = '#f0f0f0';
+  ctx.beginPath();
+  ctx.moveTo(36, -8);
+  ctx.lineTo(37.5, 1);
+  ctx.lineTo(34.5, 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(50, -9);
+  ctx.lineTo(51.5, -1);
+  ctx.lineTo(48.5, -1);
+  ctx.closePath();
+  ctx.fill();
+
+  // Drool when jaw open wide
+  if (jawOpen > 6) {
+    ctx.strokeStyle = 'rgba(200,220,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(42, -2);
+    ctx.quadraticCurveTo(41, 6 + jawOpen * 0.3, 43, 10 + jawOpen * 0.4);
+    ctx.stroke();
+  }
+
+  // === EYES - glowing red, menacing ===
+  // Eye glow
+  ctx.shadowColor = '#ff0000';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ff2200';
+  ctx.beginPath();
+  ctx.ellipse(30, -22, 4.5, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // Pupil - slit like a predator
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(30.5, -22, 1.5, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye shine
+  ctx.fillStyle = '#ff8866';
+  ctx.beginPath();
+  ctx.arc(31.5, -23.5, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Angry eyebrow
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(24, -26);
+  ctx.lineTo(35, -28);
+  ctx.stroke();
+
+  // === EARS - tall pointed ===
+  ctx.fillStyle = '#555';
+  ctx.beginPath();
+  ctx.moveTo(18, -26);
+  ctx.lineTo(12, -44);
+  ctx.lineTo(24, -28);
+  ctx.closePath();
+  ctx.fill();
+  // Inner ear
+  ctx.fillStyle = '#8a6060';
+  ctx.beginPath();
+  ctx.moveTo(18, -27);
+  ctx.lineTo(14, -40);
+  ctx.lineTo(23, -29);
+  ctx.closePath();
+  ctx.fill();
+  // Second ear (behind)
   ctx.fillStyle = '#444';
-  ctx.fillRect(11 + frontLeg1, 16, 7, 3);
-  ctx.fillRect(17 + frontLeg2, 16, 7, 3);
-  ctx.fillRect(-15 + backLeg1, 16, 7, 3);
-  ctx.fillRect(-9 + backLeg2, 16, 7, 3);
+  ctx.beginPath();
+  ctx.moveTo(24, -26);
+  ctx.lineTo(22, -42);
+  ctx.lineTo(30, -27);
+  ctx.closePath();
+  ctx.fill();
 
   ctx.restore();
 }
