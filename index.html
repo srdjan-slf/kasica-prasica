@@ -2286,6 +2286,41 @@ function startLevel() {
 // --- Input ---
 const keys = {};
 window.addEventListener('keydown', (e) => {
+  // SECRET CHEAT: CMD+P (Mac) or Ctrl+P (Win/Linux) = Continue from where you died
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    if (game.screen === 'gameOver') {
+      // Resurrect! Keep score, level, BTC - just heal and continue
+      game.cracks = 0;
+      game.screen = 'playing';
+      player.x = WIDTH / 2;
+      player.y = HEIGHT - 70;
+      player.vy = 0;
+      player.grounded = true;
+      player.facing = 0;
+      player.facingSmooth = 0;
+      game.latchedDevil = null;
+      piggyDamageTimer = 0;
+      objects.length = 0;
+      ejectedCoins.length = 0;
+      groundEnemies.length = 0;
+      lightningBolts.length = 0;
+      lightningWarning = null;
+      fartClouds.length = 0;
+      chokingDevils.length = 0;
+      gameOverDevils.length = 0;
+      resurrectionState = null;
+      isPaused = false;
+      // Flash green to show resurrection
+      successFlashTimer = 0.5;
+      spawnParticles(player.x, player.y, '\u2728', 10, 150);
+      spawnParticles(player.x, player.y, '\u2764\uFE0F', 5, 100);
+      spawnScorePopup(player.x, player.y - 40, '\u{1F47C} NASTAVAK!', '#00ff88');
+      startMusic();
+    }
+    return;
+  }
+
   // Don't process game keys during name input or shop
   if (game.screen === 'nameInput' || game.screen === 'shop') return;
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
