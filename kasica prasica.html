@@ -330,73 +330,72 @@ fsBtn.addEventListener('click', function(e) {
 
 // --- Level Configuration (with difficulty tuning) ---
 function getLevelConfig(level) {
-  // HARD MODE: tons of devils, fast bombs, chaos!
+  // 30% HARDER: faster falls, more devils, more bombs, tighter spawns
   let spawnRate, fallSpeed, devilCount, bombChance, billChance, goldChance, duration;
 
-  // 50% EASIER: slower fall, fewer devils, less bombs, more coins
   if (level === 1) {
     duration = 35;
-    fallSpeed = 80;
-    spawnRate = 1.0;
-    devilCount = 1;
-    bombChance = 0.06;
+    fallSpeed = 104;
+    spawnRate = 0.77;
+    devilCount = 2;
+    bombChance = 0.08;
     billChance = 0.12;
     goldChance = 0.04;
   } else if (level === 2) {
     duration = 40;
-    fallSpeed = 95;
-    spawnRate = 0.85;
-    devilCount = 2;
-    bombChance = 0.09;
+    fallSpeed = 124;
+    spawnRate = 0.65;
+    devilCount = 3;
+    bombChance = 0.12;
     billChance = 0.18;
     goldChance = 0.06;
   } else if (level === 3) {
     duration = 40;
-    fallSpeed = 110;
-    spawnRate = 0.7;
-    devilCount = 4;
-    bombChance = 0.11;
+    fallSpeed = 143;
+    spawnRate = 0.54;
+    devilCount = 5;
+    bombChance = 0.14;
     billChance = 0.22;
     goldChance = 0.08;
   } else if (level === 4) {
     duration = 45;
-    fallSpeed = 130;
-    spawnRate = 0.6;
-    devilCount = 5;
-    bombChance = 0.14;
+    fallSpeed = 169;
+    spawnRate = 0.46;
+    devilCount = 7;
+    bombChance = 0.18;
     billChance = 0.22;
     goldChance = 0.09;
   } else if (level === 5) {
     duration = 45;
-    fallSpeed = 150;
-    spawnRate = 0.5;
-    devilCount = 7;
-    bombChance = 0.16;
+    fallSpeed = 195;
+    spawnRate = 0.39;
+    devilCount = 9;
+    bombChance = 0.21;
     billChance = 0.28;
     goldChance = 0.12;
   } else if (level === 6) {
     duration = 50;
-    fallSpeed = 165;
-    spawnRate = 0.42;
-    devilCount = 9;
-    bombChance = 0.18;
+    fallSpeed = 215;
+    spawnRate = 0.32;
+    devilCount = 12;
+    bombChance = 0.23;
     billChance = 0.28;
     goldChance = 0.12;
   } else if (level === 7) {
     duration = 50;
-    fallSpeed = 180;
-    spawnRate = 0.35;
-    devilCount = 11;
-    bombChance = 0.20;
+    fallSpeed = 234;
+    spawnRate = 0.27;
+    devilCount = 14;
+    bombChance = 0.26;
     billChance = 0.28;
     goldChance = 0.14;
   } else {
-    // Level 8+: Gets harder but still playable
+    // Level 8+: Gets progressively brutal
     duration = 45 + level * 3;
-    fallSpeed = Math.min(280, 180 + (level - 7) * 18);
-    spawnRate = Math.max(0.2, 0.35 - (level - 7) * 0.02);
-    devilCount = Math.min(18, 11 + (level - 7) * 2);
-    bombChance = Math.min(0.30, 0.20 + (level - 7) * 0.02);
+    fallSpeed = Math.min(360, 234 + (level - 7) * 23);
+    spawnRate = Math.max(0.15, 0.27 - (level - 7) * 0.025);
+    devilCount = Math.min(24, 14 + (level - 7) * 3);
+    bombChance = Math.min(0.39, 0.26 + (level - 7) * 0.026);
     billChance = 0.28;
     goldChance = 0.14;
   }
@@ -530,10 +529,10 @@ const groundEnemies = [];
 let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
-  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 44, ai: 'straight', fromLevel: 3, size: 64 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 32, ai: 'chase', fromLevel: 4, size: 48 },
-  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 68, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 37, ai: 'relentless', fromLevel: 6, size: 42 }
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 57, ai: 'straight', fromLevel: 3, size: 64 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 42, ai: 'chase', fromLevel: 4, size: 48 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 88, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 48, ai: 'relentless', fromLevel: 6, size: 42 }
 };
 
 // --- Shake Mechanic ---
@@ -565,6 +564,139 @@ let poopAnimTimer = 0;
 let vegan = null;
 let veganDeathAnim = null;
 let veganRespawnTimer = 0;
+
+// --- Speech Bubbles System ---
+const speechBubbles = []; // {x, y, text, timer, maxTimer, targetRef}
+
+const SPEECH_LINES = {
+  devil: [
+    "Pećeš se na ražnju u paklu!",
+    "Mmm, pečena svinjica...",
+    "U paklu te čeka roštilj!",
+    "Večno ćeš se okretati na vatri!",
+    "Đavolski ćevapi od tebe!",
+    "Pakao je zagrijan za tebe!",
+    "Trebam novu kasicu za pakao!",
+    "Razbij! Razbij! RAZBIJ!",
+    "Tvoja braća su već dole!",
+    "Zvuk razbijanja me usrećuje!"
+  ],
+  carnivore: [
+    "Bliži se Božić, praščiću...",
+    "Hoću proteine!",
+    "Hrskava kožurica, mmmm!",
+    "Pečenje je već u rerni!",
+    "Idi ovamo, kotletiću!",
+    "Biftek sa pirinacom?",
+    "Šnicla ili ćevapi?",
+    "Odavno nisam jeo svinjetinu!",
+    "Dobro si se uhranio!",
+    "Baš si sočan!"
+  ],
+  wolf: [
+    "Duvaćuuuuu!",
+    "Otvorite ili duvam!",
+    "Ni cigla te neće spasiti!",
+    "Gladaaaan sam!",
+    "Grrrrrr!",
+    "Znam gde živiš!",
+    "Tri praseta, ha!",
+    "Ovaj put nema kuće!"
+  ],
+  fox: [
+    "Hehe, lukav sam!",
+    "Ne vidiš me, ne vidiš...",
+    "Brža sam od tebe!",
+    "Prevariću te!",
+    "Kuku, jadna svinjice!",
+    "Iza tebe sam!"
+  ],
+  farmer: [
+    "Dođi u obor!",
+    "Vreme za klanje!",
+    "Imaš termin u klanici!",
+    "Kvalitetna svinjetina!",
+    "Za kobasice si zreo!",
+    "Šunka za Novu godinu!"
+  ],
+  butcher: [
+    "Oštrim noževe!",
+    "Šnicla, ćevap ili pljeka?",
+    "Na redu si!",
+    "Noževi su naoštreni!",
+    "Svinjsko pečenje!",
+    "Sočna krmenadla!",
+    "Dođi bliže, ne boj se..."
+  ],
+  vegan: [
+    "Životinje su prijatelji!",
+    "Crveno meso ubija!",
+    "Čuvajmo planetu!",
+    "Meso je ubisto!",
+    "Go vegan! 🌱",
+    "Biljke su budućnost!",
+    "Svinja ima osećanja!",
+    "Proteini su i u pasulju!",
+    "Spasimo životinje!",
+    "Fabrike mesa zagađuju!"
+  ]
+};
+
+function spawnSpeechBubble(x, y, type) {
+  const lines = SPEECH_LINES[type];
+  if (!lines) return;
+  // Don't spawn too many at once
+  if (speechBubbles.length >= 3) return;
+  const text = lines[Math.floor(Math.random() * lines.length)];
+  speechBubbles.push({ x, y: y - 40, text, timer: 3.0, maxTimer: 3.0 });
+}
+
+function updateSpeechBubbles(dt) {
+  for (let i = speechBubbles.length - 1; i >= 0; i--) {
+    speechBubbles[i].timer -= dt;
+    speechBubbles[i].y -= 8 * dt; // float upward slowly
+    if (speechBubbles[i].timer <= 0) speechBubbles.splice(i, 1);
+  }
+}
+
+function drawSpeechBubbles() {
+  for (const sb of speechBubbles) {
+    const alpha = Math.min(1, sb.timer / 0.5); // fade out in last 0.5s
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 13px sans-serif';
+    const metrics = ctx.measureText(sb.text);
+    const tw = metrics.width + 16;
+    const th = 22;
+    const bx = Math.max(tw/2, Math.min(WIDTH - tw/2, sb.x));
+
+    // Bubble background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.beginPath();
+    const rx = bx - tw/2, ry = sb.y - th/2;
+    ctx.roundRect(rx, ry, tw, th, 8);
+    ctx.fill();
+    // Border
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Tail triangle
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(bx - 6, sb.y + th/2);
+    ctx.lineTo(bx, sb.y + th/2 + 8);
+    ctx.lineTo(bx + 6, sb.y + th/2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = '#222';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sb.text, bx, sb.y);
+    ctx.restore();
+  }
+}
 
 // --- Particle System ---
 const particles = [];
@@ -2249,6 +2381,7 @@ function startLevel() {
   lightningSpawnTimer = 5;
   groundEnemies.length = 0;
   groundEnemySpawnTimer = 3;
+  speechBubbles.length = 0;
   poops.length = 0;
   poopCooldown = 0;
   isPooping = false;
@@ -3162,6 +3295,34 @@ function update(dt) {
 
   // Update score pop-ups
   updateScorePopups(dt);
+
+  // Update speech bubbles
+  updateSpeechBubbles(dt);
+
+  // Spawn speech bubbles randomly from ground enemies, latched devil, vegan
+  if (Math.random() < 0.003) { // ~every 5-6 seconds on average
+    // Ground enemies speak
+    if (groundEnemies.length > 0) {
+      const e = groundEnemies[Math.floor(Math.random() * groundEnemies.length)];
+      spawnSpeechBubble(e.x, e.y, e.type);
+    }
+  }
+  if (Math.random() < 0.004 && game.latchedDevil) {
+    const d = game.latchedDevil;
+    spawnSpeechBubble(d.x, d.y, d.devilType === 'butcher' ? 'butcher' : 'devil');
+  }
+  if (Math.random() < 0.003 && vegan && vegan.state !== 'dead') {
+    spawnSpeechBubble(vegan.x, vegan.y, 'vegan');
+  }
+  // Falling devils occasionally taunt
+  if (Math.random() < 0.001) {
+    for (const obj of objects) {
+      if (obj.type === 'devil' || obj.type === 'fast_devil' || obj.type === 'heavy_devil' || obj.type === 'thief_devil') {
+        spawnSpeechBubble(obj.x, obj.y, 'devil');
+        break;
+      }
+    }
+  }
 
   // Level timer countdown
   game.levelTimer -= dt;
@@ -4243,6 +4404,491 @@ function drawWolf(x, y, dir, animTimer) {
   ctx.lineTo(30, -27);
   ctx.closePath();
   ctx.fill();
+
+  ctx.restore();
+}
+
+// --- Hand-drawn Fox ---
+function drawFoxSprite(x, y, dir, animTimer) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const legPhase = animTimer * 10;
+
+  // === BIG BUSHY TAIL with white tip ===
+  ctx.fillStyle = '#D2691E';
+  ctx.beginPath();
+  ctx.moveTo(-22, -6);
+  ctx.quadraticCurveTo(-40, -24, -34, -32);
+  ctx.quadraticCurveTo(-28, -26, -24, -20);
+  ctx.quadraticCurveTo(-20, -14, -20, -8);
+  ctx.closePath();
+  ctx.fill();
+  // Tail darker stripe
+  ctx.fillStyle = '#B8560F';
+  ctx.beginPath();
+  ctx.moveTo(-22, -8);
+  ctx.quadraticCurveTo(-36, -22, -32, -28);
+  ctx.quadraticCurveTo(-28, -24, -22, -12);
+  ctx.closePath();
+  ctx.fill();
+  // WHITE tail tip
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(-33, -30, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // === Body - orange/red, slimmer than wolf ===
+  ctx.fillStyle = '#D2691E';
+  ctx.beginPath();
+  ctx.ellipse(-2, -4, 22, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Darker back
+  ctx.fillStyle = '#B8560F';
+  ctx.beginPath();
+  ctx.ellipse(-2, -10, 18, 5, 0, Math.PI, 0);
+  ctx.fill();
+  // White belly/chest
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(4, 2, 12, 6, 0, 0, Math.PI);
+  ctx.fill();
+  // Fur texture
+  ctx.strokeStyle = '#B8560F';
+  ctx.lineWidth = 0.8;
+  for (let i = -14; i < 10; i += 5) {
+    ctx.beginPath();
+    ctx.moveTo(i, -12);
+    ctx.lineTo(i + 1.5, -5);
+    ctx.stroke();
+  }
+
+  // === Legs - animated walking ===
+  ctx.fillStyle = '#1a1a1a';
+  const fl1 = Math.sin(legPhase) * 7;
+  const fl2 = Math.sin(legPhase + Math.PI) * 7;
+  const bl1 = Math.sin(legPhase + Math.PI / 2) * 7;
+  const bl2 = Math.sin(legPhase + Math.PI * 1.5) * 7;
+  // Back legs
+  ctx.fillRect(-12 + bl1, 4, 5, 14);
+  ctx.fillRect(-5 + bl2, 4, 5, 14);
+  // Front legs
+  ctx.fillRect(8 + fl1, 4, 5, 14);
+  ctx.fillRect(15 + fl2, 4, 5, 14);
+  // Paws
+  ctx.fillStyle = '#111';
+  ctx.fillRect(7 + fl1, 16, 7, 3);
+  ctx.fillRect(14 + fl2, 16, 7, 3);
+  ctx.fillRect(-13 + bl1, 16, 7, 3);
+  ctx.fillRect(-6 + bl2, 16, 7, 3);
+
+  // === HEAD - pointed fox face ===
+  ctx.fillStyle = '#D2691E';
+  ctx.beginPath();
+  ctx.ellipse(22, -12, 13, 12, -0.1, 0, Math.PI * 2);
+  ctx.fill();
+  // White cheek patches
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(20, -5, 7, 5, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // === POINTED MUZZLE - longer and narrower than wolf ===
+  ctx.fillStyle = '#D2691E';
+  ctx.beginPath();
+  ctx.moveTo(30, -16);
+  ctx.lineTo(48, -10);
+  ctx.lineTo(48, -7);
+  ctx.lineTo(30, -4);
+  ctx.closePath();
+  ctx.fill();
+  // White muzzle underside
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(30, -6);
+  ctx.lineTo(46, -7);
+  ctx.lineTo(46, -5);
+  ctx.lineTo(30, -3);
+  ctx.closePath();
+  ctx.fill();
+  // Nose - small black
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.ellipse(48, -8.5, 3, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Nostrils
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(49, -9.5, 1, 0.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(49, -7.5, 1, 0.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Sly mouth line
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(32, -5);
+  ctx.quadraticCurveTo(40, -3, 46, -6);
+  ctx.stroke();
+
+  // === EYES - cunning amber/yellow with slit pupils ===
+  // Eye whites
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.ellipse(25, -16, 4, 3, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  // Slit pupil
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(25.5, -16, 1.2, 2.8, 0.05, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye shine
+  ctx.fillStyle = '#FFE680';
+  ctx.beginPath();
+  ctx.arc(26.5, -17.5, 1, 0, Math.PI * 2);
+  ctx.fill();
+  // Narrowed / cunning eyelids
+  ctx.strokeStyle = '#8B4513';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(20, -17);
+  ctx.quadraticCurveTo(25, -20, 30, -17.5);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(21, -14.5);
+  ctx.quadraticCurveTo(25, -12.5, 29, -14.5);
+  ctx.stroke();
+
+  // === EARS - large, pointed, dark inner ===
+  // Left ear (front)
+  ctx.fillStyle = '#D2691E';
+  ctx.beginPath();
+  ctx.moveTo(16, -20);
+  ctx.lineTo(10, -42);
+  ctx.lineTo(22, -22);
+  ctx.closePath();
+  ctx.fill();
+  // Inner ear - dark
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.moveTo(16, -22);
+  ctx.lineTo(12, -38);
+  ctx.lineTo(21, -23);
+  ctx.closePath();
+  ctx.fill();
+  // Right ear (behind)
+  ctx.fillStyle = '#B8560F';
+  ctx.beginPath();
+  ctx.moveTo(22, -20);
+  ctx.lineTo(20, -40);
+  ctx.lineTo(28, -22);
+  ctx.closePath();
+  ctx.fill();
+  // Inner ear - dark
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.moveTo(22, -22);
+  ctx.lineTo(21, -36);
+  ctx.lineTo(27, -23);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// --- Hand-drawn Devil Sprite ---
+function drawDevilSprite(x, y, size, animTimer, devilType) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Size scaling based on devilType
+  let baseSize = 36;
+  if (devilType === 'fast') baseSize = 32;
+  else if (devilType === 'heavy') baseSize = 44;
+  else if (devilType === 'thief') baseSize = 40;
+  const sc = (size / 36) * (baseSize / 36);
+
+  ctx.scale(sc, sc);
+
+  const wingFlutter = Math.sin(animTimer * 8) * 0.3;
+  const legAnim = Math.sin(animTimer * 6) * 3;
+  const hammerPhase = animTimer * 4;
+  const hammerSwing = Math.sin(hammerPhase) * 0.6;
+
+  // Color scheme per type
+  let bodyColor = '#CC0000';
+  let bodyDark = '#990000';
+  let wingColor = '#880000';
+  let hornColor = '#440000';
+  let legColor = '#660000';
+
+  if (devilType === 'fast') {
+    bodyColor = '#FF3333';
+    bodyDark = '#CC1111';
+    wingColor = '#BB2222';
+    hornColor = '#552222';
+    legColor = '#882222';
+  } else if (devilType === 'heavy') {
+    bodyColor = '#880000';
+    bodyDark = '#550000';
+    wingColor = '#660000';
+    hornColor = '#330000';
+    legColor = '#440000';
+  } else if (devilType === 'thief') {
+    bodyColor = '#993399';
+    bodyDark = '#662266';
+    wingColor = '#772277';
+    hornColor = '#441144';
+    legColor = '#553355';
+  }
+
+  // === Speed lines for fast devil ===
+  if (devilType === 'fast') {
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = '#FF6666';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) {
+      const ly = -5 + i * 8;
+      ctx.beginPath();
+      ctx.moveTo(-22 - i * 6, ly);
+      ctx.lineTo(-14 - i * 3, ly);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(22 + i * 6, ly);
+      ctx.lineTo(14 + i * 3, ly);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  // === Thin spindly legs ===
+  ctx.strokeStyle = legColor;
+  ctx.lineWidth = 2;
+  // Left leg
+  ctx.beginPath();
+  ctx.moveTo(-6, 10);
+  ctx.lineTo(-9 + legAnim, 22);
+  ctx.lineTo(-12 + legAnim, 24);
+  ctx.stroke();
+  // Right leg
+  ctx.beginPath();
+  ctx.moveTo(6, 10);
+  ctx.lineTo(9 - legAnim, 22);
+  ctx.lineTo(12 - legAnim, 24);
+  ctx.stroke();
+  // Tiny hooves
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.ellipse(-12 + legAnim, 24, 3, 1.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(12 - legAnim, 24, 3, 1.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // === Devil tail ===
+  ctx.strokeStyle = bodyDark;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-2, 8);
+  ctx.quadraticCurveTo(-18, 12, -24, 2);
+  ctx.quadraticCurveTo(-28, -4, -22, -6);
+  ctx.stroke();
+  // Arrow/spade tip
+  ctx.fillStyle = bodyDark;
+  ctx.beginPath();
+  ctx.moveTo(-22, -6);
+  ctx.lineTo(-28, -10);
+  ctx.lineTo(-24, -4);
+  ctx.lineTo(-28, -2);
+  ctx.closePath();
+  ctx.fill();
+
+  // === Bat-like wings ===
+  ctx.save();
+  // Left wing
+  ctx.save();
+  ctx.translate(-12, -6);
+  ctx.rotate(-0.4 + wingFlutter);
+  ctx.fillStyle = wingColor;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-10, -16);
+  ctx.lineTo(-6, -8);
+  ctx.lineTo(-16, -12);
+  ctx.lineTo(-8, -4);
+  ctx.lineTo(-18, -6);
+  ctx.lineTo(-10, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Wing membrane lines
+  ctx.strokeStyle = hornColor;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-10, -16);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-16, -12);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-18, -6);
+  ctx.stroke();
+  ctx.restore();
+
+  // Right wing
+  ctx.save();
+  ctx.translate(12, -6);
+  ctx.rotate(0.4 - wingFlutter);
+  ctx.fillStyle = wingColor;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(10, -16);
+  ctx.lineTo(6, -8);
+  ctx.lineTo(16, -12);
+  ctx.lineTo(8, -4);
+  ctx.lineTo(18, -6);
+  ctx.lineTo(10, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = hornColor;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(10, -16);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(16, -12);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(18, -6);
+  ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  // === Round body ===
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 14, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Darker belly shadow
+  ctx.fillStyle = bodyDark;
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 10, 6, 0, 0, Math.PI);
+  ctx.fill();
+
+  // === Horns ===
+  const hornThick = devilType === 'heavy' ? 4 : 2.5;
+  ctx.strokeStyle = hornColor;
+  ctx.lineWidth = hornThick;
+  ctx.lineCap = 'round';
+  // Left horn
+  ctx.beginPath();
+  ctx.moveTo(-6, -10);
+  ctx.quadraticCurveTo(-12, -22, -8, -26);
+  ctx.stroke();
+  // Right horn
+  ctx.beginPath();
+  ctx.moveTo(6, -10);
+  ctx.quadraticCurveTo(12, -22, 8, -26);
+  ctx.stroke();
+  // Horn tips
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(-8, -26, hornThick * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(8, -26, hornThick * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // === Evil face ===
+  // Glowing yellow eyes
+  ctx.fillStyle = '#FFDD00';
+  ctx.shadowColor = '#FFDD00';
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.ellipse(-5, -4, 3.5, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(5, -4, 3.5, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // Slit pupils
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(-5, -4, 1.2, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(5, -4, 1.2, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Angry eyebrows
+  ctx.strokeStyle = '#440000';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-8, -8);
+  ctx.lineTo(-3, -7);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(8, -8);
+  ctx.lineTo(3, -7);
+  ctx.stroke();
+
+  // Sharp grin with teeth
+  ctx.strokeStyle = '#220000';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-8, 3);
+  ctx.quadraticCurveTo(0, 10, 8, 3);
+  ctx.stroke();
+  // Teeth
+  ctx.fillStyle = '#fff';
+  for (let t = -6; t <= 6; t += 3) {
+    ctx.beginPath();
+    ctx.moveTo(t, 3 + Math.abs(t) * 0.15);
+    ctx.lineTo(t + 1.5, 3 + Math.abs(t) * 0.15);
+    ctx.lineTo(t + 0.75, 6 + Math.abs(t) * 0.1);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // === Hammer (held in right hand) ===
+  ctx.save();
+  ctx.translate(14, -2);
+  ctx.rotate(hammerSwing);
+  // Handle
+  ctx.fillStyle = '#8B6914';
+  ctx.fillRect(-1.5, 0, 3, 16);
+  // Hammer head
+  const hammerSize = devilType === 'heavy' ? 1.4 : 1.0;
+  ctx.fillStyle = '#666';
+  ctx.fillRect(-5 * hammerSize, 14, 10 * hammerSize, 6 * hammerSize);
+  ctx.fillStyle = '#888';
+  ctx.fillRect(-5 * hammerSize, 14, 10 * hammerSize, 2);
+  ctx.restore();
+
+  // === Thief: bag of coins ===
+  if (devilType === 'thief') {
+    ctx.save();
+    ctx.translate(-14, 2);
+    // Small sack
+    ctx.fillStyle = '#8B7355';
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 6, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Sack tie
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-3, -4);
+    ctx.lineTo(0, -6);
+    ctx.lineTo(3, -4);
+    ctx.stroke();
+    // $ sign
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('$', 0, 3);
+    ctx.restore();
+  }
 
   ctx.restore();
 }
@@ -6317,8 +6963,7 @@ function drawPlayingScene() {
       ctx.shadowBlur = 0;
     } else if (obj.type === 'devil') {
       const dSize = Math.round((obj.width || 38) * ms);
-      ctx.font = dSize + 'px sans-serif';
-      ctx.fillText(obj.emoji, obj.x, obj.y);
+      drawDevilSprite(obj.x, obj.y, dSize, Date.now() / 1000, obj.devilType || 'normal');
     } else {
       ctx.font = Math.round(32 * ms) + 'px sans-serif';
       ctx.fillText(obj.emoji || '', obj.x, obj.y);
@@ -6416,8 +7061,11 @@ function drawPlayingScene() {
       ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
       drawFarmerSprite(e.x, e.y, e.dir, e.animTimer);
       ctx.restore();
+    } else if (e.type === 'fox') {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
+      drawFoxSprite(e.x, e.y, e.dir, e.animTimer);
+      ctx.restore();
     } else {
-      // Fox keeps emoji for now
       ctx.save();
       ctx.translate(e.x, e.y);
       ctx.scale(ms * (e.dir < 0 ? -1 : 1), ms);
@@ -6476,31 +7124,15 @@ function drawPlayingScene() {
       ctx.fillText('\u{1F52A}', devil.x - 28, devil.y - 10 + leftKnifeY + shakeVisualOffset);
       ctx.fillText('\u{1F52A}', devil.x + 28, devil.y - 10 + rightKnifeY + shakeVisualOffset);
     } else {
-      if (devil.devilType === 'fast') {
-        // Speed lines behind fast devil
-        ctx.globalAlpha = 0.3;
-        ctx.font = '14px sans-serif';
-        for (let sl = 0; sl < 3; sl++) {
-          ctx.fillText('\u2014', devil.x - 22 - sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
-          ctx.fillText('\u2014', devil.x + 22 + sl * 8, devil.y - 5 + sl * 7 + shakeVisualOffset);
-        }
-        ctx.globalAlpha = 1.0;
-        ctx.font = devilFontSize + 'px sans-serif';
-      }
-
-      ctx.fillText(devil.emoji, devil.x, devil.y + shakeVisualOffset);
+      drawDevilSprite(devil.x, devil.y + shakeVisualOffset, devilFontSize, devil.hammerAnimTimer, devil.devilType || 'normal');
 
       // Thief: show coin being stolen periodically
       if (devil.devilType === 'thief' && devil.stealTimer < 0.25) {
         ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         ctx.fillText('\u{1F4B0}', devil.x + 20, devil.y - 10 + shakeVisualOffset);
       }
-
-      // Hammer animation (heavy has slower swing)
-      const hammerRate = devil.devilType === 'heavy' ? 0.5 : 0.3;
-      const hammerSide = Math.floor(devil.hammerAnimTimer / hammerRate) % 2 === 0 ? -1 : 1;
-      ctx.font = '24px sans-serif';
-      ctx.fillText('\u{1F528}', devil.x + hammerSide * 25, devil.y - 15 + shakeVisualOffset);
     }
 
     // Danger bar (red) - uses dynamic hammerTimeout
@@ -6658,6 +7290,9 @@ function drawPlayingScene() {
 
   // Score pop-ups
   drawScorePopups();
+
+  // Speech bubbles (on top of characters)
+  drawSpeechBubbles();
 
   // Draw vegan death animation (on top of everything except UI)
   if (veganDeathAnim) {
