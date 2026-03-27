@@ -149,6 +149,7 @@
   <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
   <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
   <div class="touch-btn poop-btn" id="btnPoop" data-key="Poop">&#128169;</div>
+  <div class="touch-btn" id="btnHouse" data-key="k" style="width:50px;height:50px;font-size:22px;background:rgba(180,120,60,0.25);border-color:rgba(180,120,60,0.6);">&#127968;</div>
   <div class="shake-col">
     <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
@@ -2512,6 +2513,44 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
+  // HOUSE SUMMON - K key (buy a house for shelter)
+  // Picks best house you can afford: brick (200) > sticks (100) > straw (50)
+  if ((e.key === 'k' || e.key === 'K') && game.screen === 'playing' && !player.inHouse) {
+    if (houses.length < 1) { // max 1 house at a time
+      let houseType = null;
+      let cost = 0;
+      if (game.score >= 200) { houseType = 'brick'; cost = 200; }
+      else if (game.score >= 100) { houseType = 'sticks'; cost = 100; }
+      else if (game.score >= 50) { houseType = 'straw'; cost = 50; }
+
+      if (houseType) {
+        game.score -= cost;
+        const ht = HOUSE_TYPES[houseType];
+        houses.push({
+          type: houseType,
+          x: player.x,
+          y: HEIGHT - 30,
+          width: 90,
+          height: 80,
+          hp: ht.hp,
+          maxHp: ht.hp,
+          shakeTimer: 0,
+          wolfBlowCount: 0,
+          wolfBlowing: null,
+          attackTimer: 0
+        });
+        spawnScorePopup(player.x, player.y - 50, ht.name + ' (-' + cost + ')', '#FFD700');
+        spawnParticles(player.x, player.y, '🏠', 3, 60);
+        player.inHouse = houses[houses.length - 1]; // auto-enter
+      } else {
+        // Not enough money
+        spawnScorePopup(player.x, player.y - 40, 'Nemaš para! (min 50)', '#ff4444');
+      }
+    } else {
+      spawnScorePopup(player.x, player.y - 40, 'Već imaš kuću!', '#ffaa00');
+    }
+  }
+
   // Fart mechanic - SPACE during gameplay (not while in house)
   if (e.key === ' ' && game.screen === 'playing') {
     if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
@@ -2674,6 +2713,29 @@ function simulateKeyDown(keyName) {
       shakeVisualOffset = 5;
       shakeVisualTimer = 0.08;
       playShakeSound();
+    }
+  }
+
+  // House summon on K (touch)
+  if (keyName === 'k' && game.screen === 'playing' && !player.inHouse && houses.length < 1) {
+    let houseType = null;
+    let cost = 0;
+    if (game.score >= 200) { houseType = 'brick'; cost = 200; }
+    else if (game.score >= 100) { houseType = 'sticks'; cost = 100; }
+    else if (game.score >= 50) { houseType = 'straw'; cost = 50; }
+    if (houseType) {
+      game.score -= cost;
+      const ht = HOUSE_TYPES[houseType];
+      houses.push({
+        type: houseType, x: player.x, y: HEIGHT - 30,
+        width: 90, height: 80, hp: ht.hp, maxHp: ht.hp,
+        shakeTimer: 0, wolfBlowCount: 0, wolfBlowing: null, attackTimer: 0
+      });
+      spawnScorePopup(player.x, player.y - 50, ht.name + ' (-' + cost + ')', '#FFD700');
+      spawnParticles(player.x, player.y, '\u{1F3E0}', 3, 60);
+      player.inHouse = houses[houses.length - 1];
+    } else {
+      spawnScorePopup(player.x, player.y - 40, 'Nema\u0161 para! (min 50)', '#ff4444');
     }
   }
 
@@ -3945,35 +4007,9 @@ function update(dt) {
     }
   }
 
-  // --- House Spawn ---
-  if (game.level >= 1) {
-    houseSpawnTimer -= dt;
-    const hasWolves = groundEnemies.some(function(e) { return e.type === 'wolf'; });
-    if (houseSpawnTimer <= 0 && houses.length < 2) {
-      houseSpawnTimer = hasWolves ? (8 + Math.random() * 5) : (12 + Math.random() * 8);
-      var roll = Math.random();
-      var houseType;
-      if (game.level >= 5 && roll < 0.15) houseType = 'brick';
-      else if (roll < 0.45) houseType = 'sticks';
-      else houseType = 'straw';
-      var ht = HOUSE_TYPES[houseType];
-      var hx = 100 + Math.random() * (WIDTH - 200);
-      houses.push({
-        type: houseType,
-        x: hx,
-        y: HEIGHT - 30,
-        width: 90,
-        height: 80,
-        hp: ht.hp,
-        maxHp: ht.hp,
-        shakeTimer: 0,
-        wolfBlowCount: 0,
-        wolfBlowing: null,
-        attackTimer: 0
-      });
-      spawnScorePopup(hx, HEIGHT - 80, ht.name + ' ' + ht.emoji, '#FFD700');
-    }
-  }
+  // --- House System (no auto-spawn, player buys with K key) ---
+  // Houses are summoned by pressing K - costs score points
+  // Straw: 50, Sticks: 100, Brick: 200
 
   // Update house shake timers
   for (var hi = 0; hi < houses.length; hi++) {
