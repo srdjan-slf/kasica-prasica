@@ -515,7 +515,8 @@ const player = {
   groundY: HEIGHT - 70,
   jumpForce: -600,
   gravity: 1200,
-  slamGravity: 3600
+  slamGravity: 3600,
+  inHouse: null
 };
 
 // --- Falling Objects ---
@@ -533,6 +534,16 @@ const GROUND_ENEMY_TYPES = {
   carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 42, ai: 'chase', fromLevel: 4, size: 48 },
   fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 88, ai: 'cunning', fromLevel: 5, size: 38 },
   farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 48, ai: 'relentless', fromLevel: 6, size: 42 }
+};
+
+// --- House Shelter System (Three Little Pigs) ---
+const houses = [];
+let houseSpawnTimer = 8; // first house spawns after 8 seconds
+
+const HOUSE_TYPES = {
+  straw:  { name: 'Kuća od slame', hp: 2,  wallColor: '#DAA520', roofColor: '#F0E68C', wolfBlows: 1, emoji: '🌾' },
+  sticks: { name: 'Kuća od pruća', hp: 4,  wallColor: '#8B4513', roofColor: '#A0522D', wolfBlows: 3, emoji: '🪵' },
+  brick:  { name: 'Kuća od cigle', hp: 8,  wallColor: '#B22222', roofColor: '#8B0000', wolfBlows: 99, emoji: '🧱' }
 };
 
 // --- Shake Mechanic ---
@@ -2404,6 +2415,9 @@ function startLevel() {
   }
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
+  houses.length = 0;
+  houseSpawnTimer = 8;
+  player.inHouse = null;
   player.x = WIDTH / 2;
   player.y = player.groundY;
   player.vy = 0;
@@ -2433,6 +2447,9 @@ window.addEventListener('keydown', (e) => {
       player.facing = 0;
       player.facingSmooth = 0;
       game.latchedDevil = null;
+      player.inHouse = null;
+      houses.length = 0;
+      houseSpawnTimer = 8;
       piggyDamageTimer = 0;
       objects.length = 0;
       ejectedCoins.length = 0;
@@ -2495,9 +2512,9 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
-  // Fart mechanic - SPACE during gameplay
+  // Fart mechanic - SPACE during gameplay (not while in house)
   if (e.key === ' ' && game.screen === 'playing') {
-    if (fartCharges > 0 && fartCooldown <= 0) {
+    if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5; // half second cooldown
       // Spawn fart cloud at piggy's butt (behind/below the piggy)
@@ -3009,6 +3026,13 @@ function aabb(a, b) {
 
 // --- Update ---
 function triggerDamage(fromBomb) {
+  if (player.inHouse && player.inHouse.hp > 0) {
+    // Redirect damage to house
+    player.inHouse.hp--;
+    player.inHouse.shakeTimer = 0.3;
+    spawnParticles(player.inHouse.x, player.inHouse.y - 40, '💥', 2, 60);
+    return; // player is protected
+  }
   if (hasShield) {
     hasShield = false;
     spawnParticles(player.x, player.y, '\uD83D\uDEE1\uFE0F', 4, 150);
@@ -3237,6 +3261,9 @@ function update(dt) {
         player.vy = 0;
         player.grounded = true;
         game.latchedDevil = null;
+        player.inHouse = null;
+        houses.length = 0;
+        houseSpawnTimer = 8;
         resurrectionState = 'done';
         startMusic();
       }
@@ -3397,6 +3424,27 @@ function update(dt) {
     player.y = player.groundY;
   }
 
+  // --- House Entry/Exit ---
+  if (player.grounded) {
+    if (player.inHouse) {
+      // Check if player walked out
+      const ih = player.inHouse;
+      if (Math.abs(player.x - ih.x) > ih.width * 0.6 || ih.hp <= 0) {
+        player.inHouse = null; // exited
+      }
+    } else {
+      // Check if player walks into a house
+      for (const h of houses) {
+        if (Math.abs(player.x - h.x) < h.width * 0.4 && h.hp > 0) {
+          player.inHouse = h;
+          break;
+        }
+      }
+    }
+  }
+  // Not grounded = not in house
+  if (!player.grounded) player.inHouse = null;
+
   // Spawn timer
   const spawnRate = game.levelConfig ? game.levelConfig.spawnRate : 1.0;
   spawnTimer += dt;
@@ -3427,8 +3475,8 @@ function update(dt) {
   // Update fart cooldown
   if (fartCooldown > 0) fartCooldown -= dt;
 
-  // Poop: both LEFT and RIGHT held simultaneously while grounded (or mobile Poop button)
-  if ((keys['ArrowLeft'] && keys['ArrowRight'] || keys['Poop']) && player.grounded && poopCooldown <= 0 && !isPooping) {
+  // Poop: both LEFT and RIGHT held simultaneously while grounded (or mobile Poop button) - not in house
+  if ((keys['ArrowLeft'] && keys['ArrowRight'] || keys['Poop']) && player.grounded && poopCooldown <= 0 && !isPooping && !player.inHouse) {
     isPooping = true;
     poopAnimTimer = 0.6;
   }
@@ -3685,6 +3733,23 @@ function update(dt) {
 
     // Collision with player
     if (aabb(player, obj)) {
+      // House protection: bombs damage house, devils bounce off
+      if (player.inHouse && player.inHouse.hp > 0 && (obj.type === 'bomb' || obj.type === 'devil' || obj.type === 'butcher')) {
+        if (obj.type === 'bomb') {
+          player.inHouse.hp = Math.max(0, player.inHouse.hp - 3);
+          player.inHouse.shakeTimer = 0.4;
+          spawnParticles(player.inHouse.x, player.inHouse.y - 40, '💥', 4, 100);
+          triggerScreenShake(6, 0.2);
+        } else {
+          // Devil/butcher bounces off roof
+          obj.flyAway = true;
+          obj.flyAwayTimer = 1.0;
+          spawnParticles(player.inHouse.x, player.inHouse.y - 60, '💫', 3, 80);
+          player.inHouse.shakeTimer = 0.2;
+        }
+        objects.splice(i, 1);
+        continue;
+      }
       if (obj.type === 'bomb') {
         triggerDamage(true);
         objects.splice(i, 1);
@@ -3880,6 +3945,53 @@ function update(dt) {
     }
   }
 
+  // --- House Spawn ---
+  if (game.level >= 1) {
+    houseSpawnTimer -= dt;
+    const hasWolves = groundEnemies.some(function(e) { return e.type === 'wolf'; });
+    if (houseSpawnTimer <= 0 && houses.length < 2) {
+      houseSpawnTimer = hasWolves ? (8 + Math.random() * 5) : (12 + Math.random() * 8);
+      var roll = Math.random();
+      var houseType;
+      if (game.level >= 5 && roll < 0.15) houseType = 'brick';
+      else if (roll < 0.45) houseType = 'sticks';
+      else houseType = 'straw';
+      var ht = HOUSE_TYPES[houseType];
+      var hx = 100 + Math.random() * (WIDTH - 200);
+      houses.push({
+        type: houseType,
+        x: hx,
+        y: HEIGHT - 30,
+        width: 90,
+        height: 80,
+        hp: ht.hp,
+        maxHp: ht.hp,
+        shakeTimer: 0,
+        wolfBlowCount: 0,
+        wolfBlowing: null,
+        attackTimer: 0
+      });
+      spawnScorePopup(hx, HEIGHT - 80, ht.name + ' ' + ht.emoji, '#FFD700');
+    }
+  }
+
+  // Update house shake timers
+  for (var hi = 0; hi < houses.length; hi++) {
+    if (houses[hi].shakeTimer > 0) houses[hi].shakeTimer -= dt;
+    if (houses[hi].attackTimer > 0) houses[hi].attackTimer -= dt;
+  }
+  // Remove destroyed houses
+  for (var hi2 = houses.length - 1; hi2 >= 0; hi2--) {
+    if (houses[hi2].hp <= 0) {
+      var dh = houses[hi2];
+      spawnParticles(dh.x, dh.y - 40, dh.type === 'straw' ? '🌾' : (dh.type === 'sticks' ? '🪵' : '🧱'), 8, 120);
+      spawnParticles(dh.x, dh.y - 40, '💨', 4, 80);
+      triggerScreenShake(5, 0.3);
+      if (player.inHouse === dh) player.inHouse = null;
+      houses.splice(hi2, 1);
+    }
+  }
+
   // --- Ground Enemies ---
   if (game.level >= 3) {
     groundEnemySpawnTimer -= dt;
@@ -3915,6 +4027,58 @@ function update(dt) {
   for (let i = groundEnemies.length - 1; i >= 0; i--) {
     const e = groundEnemies[i];
     e.animTimer += dt;
+
+    // Wolf blowing at house mechanic
+    if (e.blowingAtHouse) {
+      const bh = e.blowingAtHouse;
+      if (bh.hp <= 0 || !player.inHouse || player.inHouse !== bh) {
+        // House destroyed or player left - stop blowing
+        e.blowingAtHouse = null;
+        e.blowTimer = 0;
+        e.blowCount = 0;
+        bh.wolfBlowing = null;
+      } else {
+        e.blowTimer = (e.blowTimer || 0) + dt;
+        if (e.blowTimer >= 1.5) {
+          e.blowTimer = 0;
+          e.blowCount = (e.blowCount || 0) + 1;
+          bh.wolfBlowCount = (bh.wolfBlowCount || 0) + 1;
+          bh.shakeTimer = 0.3;
+          spawnParticles(bh.x, bh.y - 40, '💨', 4, 100);
+          spawnSpeechBubble(e.x, e.y, 'wolf');
+          triggerScreenShake(3, 0.2);
+          var maxBlows = HOUSE_TYPES[bh.type].wolfBlows;
+          if (bh.type === 'brick' && e.blowCount >= 5) {
+            // Brick house: wolf gives up
+            speechBubbles.push({ x: e.x, y: e.y - 50, text: 'Ne mogu... *kašalj*', timer: 2.5, maxTimer: 2.5 });
+            e.blowingAtHouse = null;
+            bh.wolfBlowing = null;
+            // Wolf flees
+            e.ai = 'straight';
+            e.dir = e.x < WIDTH / 2 ? -1 : 1;
+            e.speed = 150;
+          } else if (bh.wolfBlowCount >= maxBlows) {
+            bh.hp = 0; // destroyed!
+            e.blowingAtHouse = null;
+            bh.wolfBlowing = null;
+          }
+        }
+        continue; // wolf stands still while blowing
+      }
+    }
+
+    // Check if wolf should start blowing at a house
+    if (e.type === 'wolf' && !e.blowingAtHouse && player.inHouse && player.inHouse.hp > 0) {
+      var ph = player.inHouse;
+      if (Math.abs(e.x - ph.x) < ph.width * 0.7 && !ph.wolfBlowing) {
+        e.blowingAtHouse = ph;
+        ph.wolfBlowing = e;
+        e.blowTimer = 0;
+        e.blowCount = 0;
+        speechBubbles.push({ x: e.x, y: e.y - 50, text: 'Duvaćuuuuu!', timer: 2.0, maxTimer: 2.0 });
+        continue;
+      }
+    }
 
     switch (e.ai) {
       case 'straight':
@@ -3954,9 +4118,17 @@ function update(dt) {
     // Collision with player - ONLY if player is on or near ground level
     // (player can jump OVER them)
     if (player.grounded && aabb(player, e)) {
-      triggerDamage(false);
-      groundEnemies.splice(i, 1);
-      spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
+      if (player.inHouse && player.inHouse.hp > 0) {
+        // Player is sheltered - redirect damage to house
+        player.inHouse.hp--;
+        player.inHouse.shakeTimer = 0.3;
+        spawnParticles(player.inHouse.x, player.inHouse.y - 40, '💥', 2, 60);
+        groundEnemies.splice(i, 1);
+      } else {
+        triggerDamage(false);
+        groundEnemies.splice(i, 1);
+        spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
+      }
     }
   }
 
@@ -6854,6 +7026,224 @@ function drawTitle() {
   }
 }
 
+// --- Draw House ---
+function drawHouse(house) {
+  const ht = HOUSE_TYPES[house.type];
+  const w = house.width;
+  const h = house.height;
+  const baseX = house.x - w / 2;
+  const baseY = house.y - h;
+  const dmgRatio = house.hp / house.maxHp;
+
+  ctx.save();
+
+  // Shake wobble when shakeTimer > 0
+  if (house.shakeTimer > 0) {
+    const wobble = Math.sin(house.shakeTimer * 40) * 3;
+    ctx.translate(wobble, 0);
+  }
+
+  if (house.type === 'straw') {
+    // --- STRAW HOUSE ---
+    // Walls - golden straw color with straw line texture
+    ctx.fillStyle = ht.wallColor;
+    ctx.fillRect(baseX + 10, baseY + 30, w - 20, h - 30);
+    // Straw lines texture
+    ctx.strokeStyle = '#C4961A';
+    ctx.lineWidth = 1;
+    for (let sy = baseY + 34; sy < baseY + h - 4; sy += 5) {
+      ctx.beginPath();
+      ctx.moveTo(baseX + 12, sy);
+      ctx.lineTo(baseX + w - 12, sy + (Math.random() - 0.5) * 3);
+      ctx.stroke();
+    }
+    // Triangular roof with messy straw texture
+    ctx.fillStyle = ht.roofColor;
+    ctx.beginPath();
+    ctx.moveTo(baseX - 5, baseY + 32);
+    ctx.lineTo(baseX + w / 2, baseY - 5);
+    ctx.lineTo(baseX + w + 5, baseY + 32);
+    ctx.closePath();
+    ctx.fill();
+    // Straw wisps on roof
+    ctx.strokeStyle = '#DAA520';
+    ctx.lineWidth = 1.5;
+    for (let r = 0; r < 8; r++) {
+      const rx = baseX + 5 + Math.random() * (w - 10);
+      const ry = baseY + 10 + Math.random() * 18;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx + (Math.random() - 0.5) * 15, ry - 8 - Math.random() * 10);
+      ctx.stroke();
+    }
+    // Door
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(baseX + w / 2 - 8, baseY + h - 28, 16, 28);
+    // Round window
+    ctx.fillStyle = '#87CEEB';
+    ctx.beginPath();
+    ctx.arc(baseX + w * 0.75, baseY + 46, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else if (house.type === 'sticks') {
+    // --- STICK HOUSE ---
+    // Wooden plank walls
+    ctx.fillStyle = ht.wallColor;
+    ctx.fillRect(baseX + 8, baseY + 28, w - 16, h - 28);
+    // Wood grain lines
+    ctx.strokeStyle = '#6B3410';
+    ctx.lineWidth = 1;
+    for (let py = baseY + 30; py < baseY + h - 2; py += 7) {
+      ctx.beginPath();
+      ctx.moveTo(baseX + 8, py);
+      ctx.lineTo(baseX + w - 8, py);
+      ctx.stroke();
+    }
+    // Vertical plank divisions
+    for (let px = baseX + 20; px < baseX + w - 10; px += 18) {
+      ctx.beginPath();
+      ctx.moveTo(px, baseY + 28);
+      ctx.lineTo(px, baseY + h);
+      ctx.stroke();
+    }
+    // Angled stick roof
+    ctx.fillStyle = ht.roofColor;
+    ctx.beginPath();
+    ctx.moveTo(baseX - 6, baseY + 30);
+    ctx.lineTo(baseX + w / 2, baseY - 2);
+    ctx.lineTo(baseX + w + 6, baseY + 30);
+    ctx.closePath();
+    ctx.fill();
+    // Stick lines on roof
+    ctx.strokeStyle = '#6B3410';
+    ctx.lineWidth = 2;
+    for (let r = 0; r < 5; r++) {
+      const rx = baseX + 10 + r * (w / 5);
+      ctx.beginPath();
+      ctx.moveTo(rx, baseY + 28);
+      ctx.lineTo(baseX + w / 2, baseY);
+      ctx.stroke();
+    }
+    // Wooden door
+    ctx.fillStyle = '#6B3410';
+    ctx.fillRect(baseX + w / 2 - 9, baseY + h - 30, 18, 30);
+    ctx.strokeStyle = '#4A2508';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(baseX + w / 2 - 9, baseY + h - 30, 18, 30);
+    // Square window with cross frame
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(baseX + w * 0.7, baseY + 42, 14, 14);
+    ctx.strokeStyle = '#6B3410';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(baseX + w * 0.7, baseY + 42, 14, 14);
+    ctx.beginPath();
+    ctx.moveTo(baseX + w * 0.7 + 7, baseY + 42);
+    ctx.lineTo(baseX + w * 0.7 + 7, baseY + 56);
+    ctx.moveTo(baseX + w * 0.7, baseY + 49);
+    ctx.lineTo(baseX + w * 0.7 + 14, baseY + 49);
+    ctx.stroke();
+  } else {
+    // --- BRICK HOUSE ---
+    // Brick wall with mortar pattern
+    ctx.fillStyle = ht.wallColor;
+    ctx.fillRect(baseX + 6, baseY + 26, w - 12, h - 26);
+    // Draw brick rows
+    ctx.strokeStyle = '#D4A373';
+    ctx.lineWidth = 1;
+    let brickRow = 0;
+    for (let by = baseY + 28; by < baseY + h - 2; by += 8) {
+      const offset = (brickRow % 2 === 0) ? 0 : 10;
+      for (let bx = baseX + 6 + offset; bx < baseX + w - 6; bx += 20) {
+        ctx.strokeRect(bx, by, 18, 7);
+      }
+      brickRow++;
+    }
+    // Solid dark red roof
+    ctx.fillStyle = ht.roofColor;
+    ctx.beginPath();
+    ctx.moveTo(baseX - 4, baseY + 28);
+    ctx.lineTo(baseX + w / 2, baseY - 5);
+    ctx.lineTo(baseX + w + 4, baseY + 28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#5C0000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Chimney on top
+    ctx.fillStyle = '#8B0000';
+    ctx.fillRect(baseX + w * 0.65, baseY - 5, 12, 20);
+    ctx.fillStyle = '#5C0000';
+    ctx.fillRect(baseX + w * 0.65 - 2, baseY - 7, 16, 4);
+    // Arched door
+    ctx.fillStyle = '#5C0000';
+    ctx.fillRect(baseX + w / 2 - 10, baseY + h - 32, 20, 32);
+    ctx.beginPath();
+    ctx.arc(baseX + w / 2, baseY + h - 32, 10, Math.PI, 0);
+    ctx.fill();
+    // Nice window
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(baseX + w * 0.7, baseY + 40, 16, 14);
+    ctx.strokeStyle = '#5C0000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(baseX + w * 0.7, baseY + 40, 16, 14);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(baseX + w * 0.7 + 8, baseY + 40);
+    ctx.lineTo(baseX + w * 0.7 + 8, baseY + 54);
+    ctx.moveTo(baseX + w * 0.7, baseY + 47);
+    ctx.lineTo(baseX + w * 0.7 + 16, baseY + 47);
+    ctx.stroke();
+  }
+
+  // Damage: cracks/holes when hp < maxHp
+  if (dmgRatio < 1.0) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 2;
+    const crackCount = Math.ceil((1 - dmgRatio) * 5);
+    for (let c = 0; c < crackCount; c++) {
+      const cx = baseX + 15 + (c * 17) % (w - 30);
+      const cy = baseY + 35 + (c * 13) % (h - 40);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + 8, cy + 6);
+      ctx.lineTo(cx + 4, cy + 14);
+      ctx.lineTo(cx + 12, cy + 18);
+      ctx.stroke();
+    }
+  }
+
+  // Player peeking through window when inside
+  if (player.inHouse === house) {
+    const winX = house.type === 'brick' ? baseX + w * 0.7 + 8 : (house.type === 'sticks' ? baseX + w * 0.7 + 7 : baseX + w * 0.75);
+    const winY = house.type === 'brick' ? baseY + 47 : (house.type === 'sticks' ? baseY + 49 : baseY + 46);
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👀', winX, winY);
+  }
+
+  // HP bar above house
+  const hpBarW = 40;
+  const hpBarH = 4;
+  const hpBarX = house.x - hpBarW / 2;
+  const hpBarY = baseY - 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+  const hpColor = dmgRatio > 0.5 ? '#4CAF50' : (dmgRatio > 0.25 ? '#FFC107' : '#f44336');
+  ctx.fillStyle = hpColor;
+  ctx.fillRect(hpBarX, hpBarY, hpBarW * dmgRatio, hpBarH);
+
+  // House type emoji label
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ht.emoji, house.x, baseY - 18);
+
+  ctx.restore();
+}
+
 function drawPlayingScene() {
   ctx.save();
   // Apply screen shake
@@ -7024,6 +7414,11 @@ function drawPlayingScene() {
         ctx.fillText('⚠️ MUNJA!', lw.x, HEIGHT - 50);
       }
     }
+  }
+
+  // Draw houses (behind enemies but in front of ground)
+  for (const h of houses) {
+    drawHouse(h);
   }
 
   // Draw poops with stink waves (behind enemies)
