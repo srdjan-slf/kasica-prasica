@@ -488,6 +488,37 @@ let resurrectionCost = 0;
 // --- Pause State ---
 let isPaused = false;
 
+// Track introduced enemy types for "Who is this?" popups
+const introducedEnemies = {};
+let enemyIntroActive = null; // { icon, name, desc, timer, alpha }
+
+const ENEMY_INTROS = {
+  devil_fast: { icon: '\u{1F608}', name: 'BRZI \u0110AVO', desc: 'Leti brzo i ka\u010Di se za kasicu! Tresenje: \u2191\u2193' },
+  devil_heavy: { icon: '\u{1F47F}', name: 'TE\u0160KI \u0110AVO', desc: 'Spor ali jak! Treba vi\u0161e tresenja!' },
+  devil_thief: { icon: '\u{1F608}', name: '\u0110AVO LOPOV', desc: 'Krade nov\u010Di\u0107e kad se zaka\u010Di!' },
+  butcher: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'No\u017Eevima skida srca! Otresi ga brzo!' },
+  wolf: { icon: '\u{1F43A}', name: 'VUK', desc: 'Tr\u010Di po zemlji! Presko\u010Di ga ili se sakrij u ku\u0107u!' },
+  fox: { icon: '\u{1F98A}', name: 'LISICA', desc: 'Lukava i brza! Presko\u010Di je!' },
+  carnivore: { icon: '\u{1F356}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
+  farmer: { icon: '\u{1F468}\u200D\u{1F33E}', name: 'FARMER', desc: 'Hvata svinje za klanicu!' },
+  vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Brani te od meso\u017Edera! \u010Cuvaj ga!' },
+  bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' }
+};
+
+function triggerEnemyIntro(type) {
+  if (introducedEnemies[type]) return;
+  const info = ENEMY_INTROS[type];
+  if (!info) return;
+  introducedEnemies[type] = true;
+  enemyIntroActive = {
+    icon: info.icon,
+    name: info.name,
+    desc: info.desc,
+    timer: 3.0,
+    alpha: 0
+  };
+}
+
 // --- Victory Screen State ---
 let victoryTimer = 0;
 let victoryPiglets = [];
@@ -534,8 +565,12 @@ const GROUND_ENEMY_TYPES = {
   wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 57, ai: 'straight', fromLevel: 3, size: 64 },
   carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 42, ai: 'chase', fromLevel: 4, size: 48 },
   fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 88, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 48, ai: 'relentless', fromLevel: 6, size: 42 }
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 48, ai: 'relentless', fromLevel: 6, size: 42 },
+  butcher_ground: { emoji: '🔪', name: 'Kasapin', speed: 65, ai: 'chase', fromLevel: 5, size: 55 }
 };
+
+// --- Airplanes (deliver falling butchers) ---
+let airplanes = [];
 
 // --- House Shelter System (Three Little Pigs) ---
 const houses = [];
@@ -2118,6 +2153,7 @@ function spawnObject() {
       emoji: '\u{1F4A3}',
       value: 0
     });
+    triggerEnemyIntro('bomb');
     return;
   }
 
@@ -2231,34 +2267,30 @@ function spawnDevil() {
     zigzagSpeed, zigzagFreq, zigzagPhase,
     zigzagTime: 0 // tracks time for zigzag calculation
   });
+  triggerEnemyIntro('devil_' + devilType);
 }
 
 function spawnButcher() {
   const cfg = game.levelConfig;
   const baseSpeed = cfg ? cfg.fallSpeed * 0.95 : 150;
+  const size = 50;
 
-  // Butcher is tough - slower but requires more shakes
-  const speed = baseSpeed * 0.525;
-  const shakeRequired = 10;
-  const hammerTimeout = 6; // 6 seconds to shake off
-  const size = 50; // bigger than devils
-
-  const zigzagSpeed = 60 + Math.random() * 80;
-  const zigzagFreq = 1.0 + Math.random() * 2;
-  const zigzagPhase = Math.random() * Math.PI * 2;
-
-  objects.push({
-    type: 'butcher',
-    emoji: '\u{1F9D1}\u200D\u{1F373}',
-    x: Math.random() * (WIDTH - size) + size / 2,
-    y: -size,
-    width: size, height: size, speed,
-    latched: false, hammerTimer: 0, shakeProgress: 0,
-    shakeRequired, hammerTimeout, hammerAnimTimer: 0,
-    stealTimer: 0,
-    zigzagSpeed, zigzagFreq, zigzagPhase,
-    zigzagTime: 0
+  // Create airplane that will drop the butcher
+  const dropX = 100 + Math.random() * (WIDTH - 200);
+  const fromLeft = Math.random() > 0.5;
+  airplanes.push({
+    x: fromLeft ? -60 : WIDTH + 60,
+    y: 30 + Math.random() * 20,
+    speed: 200,
+    dir: fromLeft ? 1 : -1,
+    dropX: dropX,
+    dropped: false,
+    butcherData: {
+      baseSpeed: baseSpeed,
+      size: size
+    }
   });
+  triggerEnemyIntro('butcher');
 }
 
 function playButcherLatch() {
@@ -2393,6 +2425,7 @@ function startLevel() {
   lightningSpawnTimer = 5;
   groundEnemies.length = 0;
   groundEnemySpawnTimer = 3;
+  airplanes.length = 0;
   speechBubbles.length = 0;
   poops.length = 0;
   poopCooldown = 0;
@@ -2413,6 +2446,7 @@ function startLevel() {
       blockTimer: 0,
       auraTimer: 0
     };
+    triggerEnemyIntro('vegan');
   }
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
@@ -2612,6 +2646,8 @@ window.addEventListener('keydown', (e) => {
       game.score = 0;
       game.level = 1;
       game.screen = 'title';
+      Object.keys(introducedEnemies).forEach(k => delete introducedEnemies[k]);
+      enemyIntroActive = null;
     } else if (game.screen === 'levelComplete') {
       game.screen = 'shop';
     } else if (game.screen === 'victory') {
@@ -3346,6 +3382,13 @@ function update(dt) {
 
   if (game.screen !== 'playing') return;
 
+  // Update enemy intro popup (runs even when paused)
+  if (enemyIntroActive) {
+    enemyIntroActive.timer -= dt;
+    enemyIntroActive.alpha = Math.min(1, enemyIntroActive.alpha + dt * 4);
+    if (enemyIntroActive.timer <= 0) enemyIntroActive = null;
+  }
+
   // Don't update gameplay while paused
   if (isPaused) return;
 
@@ -3531,6 +3574,47 @@ function update(dt) {
     if (game.levelTimer <= nextButcherTime) {
       game.butcherSchedule.shift();
       spawnButcher();
+    }
+  }
+
+  // Update airplanes
+  for (let i = airplanes.length - 1; i >= 0; i--) {
+    const plane = airplanes[i];
+    plane.x += plane.speed * plane.dir * dt;
+
+    // Drop butcher when passing dropX
+    if (!plane.dropped && ((plane.dir > 0 && plane.x >= plane.dropX) || (plane.dir < 0 && plane.x <= plane.dropX))) {
+      plane.dropped = true;
+      const cfg = getLevelConfig(game.level);
+      const bd = plane.butcherData;
+      const size = bd.size;
+      const baseSpeed = bd.baseSpeed;
+      const zigzagSpeed = 60 + Math.random() * 80;
+      const zigzagFreq = 1.0 + Math.random() * 2;
+      const zigzagPhase = Math.random() * Math.PI * 2;
+      objects.push({
+        type: 'butcher',
+        emoji: '\u{1F9D1}\u200D\u{1F373}',
+        x: plane.x,
+        y: plane.y + 20,
+        width: size, height: size,
+        speed: baseSpeed * 0.525 * 0.3, // SLOW with parachute
+        hasParachute: true,
+        parachuteDetachY: 200 + Math.random() * 100,
+        normalSpeed: baseSpeed * 0.525 * 1.3,
+        latched: false, hammerTimer: 0, shakeProgress: 0,
+        shakeRequired: 5 + Math.floor(game.level / 2),
+        hammerTimeout: 6, hammerAnimTimer: 0,
+        stealTimer: 0,
+        zigzagSpeed, zigzagFreq, zigzagPhase,
+        zigzagTime: 0,
+        knifeTimer: 0
+      });
+    }
+
+    // Remove airplane when off screen
+    if ((plane.dir > 0 && plane.x > WIDTH + 100) || (plane.dir < 0 && plane.x < -100)) {
+      airplanes.splice(i, 1);
     }
   }
 
@@ -3769,6 +3853,13 @@ function update(dt) {
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     obj.y += obj.speed * dt;
+
+    // Parachute detachment for butchers
+    if (obj.hasParachute && obj.y >= obj.parachuteDetachY) {
+      obj.hasParachute = false;
+      obj.speed = obj.normalSpeed;
+      spawnParticles(obj.x, obj.y, '🪂', 1, 50);
+    }
 
     // Zigzag movement for devils
     if ((obj.type === 'devil' || obj.type === 'butcher') && !obj.latched && !obj.flyAway && obj.zigzagSpeed) {
@@ -4056,6 +4147,7 @@ function update(dt) {
           pauseTimer: 0,
           animTimer: 0
         });
+        triggerEnemyIntro(key);
       }
     }
   }
@@ -4234,9 +4326,9 @@ function update(dt) {
     } else {
       // Actively patrol near player (closer, more protective)
       vegan.state = 'patrol';
-      const targetX = player.x + Math.sin(Date.now() / 800) * 80;
+      const targetX = player.x + Math.sin(Date.now() / 1200) * 180;
       vegan.dir = targetX > vegan.x ? 1 : -1;
-      vegan.x += vegan.speed * 1.5 * vegan.dir * dt;
+      vegan.x += vegan.speed * 0.8 * vegan.dir * dt;
     }
 
     if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
@@ -4291,6 +4383,7 @@ function update(dt) {
       };
       spawnParticles(vegan.x, vegan.y, '🌿', 5, 100);
       spawnScorePopup(vegan.x, vegan.y - 30, 'Vegan se vratio! 🌱', '#44cc44');
+      triggerEnemyIntro('vegan');
     }
   }
 }
@@ -5436,6 +5529,156 @@ function drawCarnivoreSprite(x, y, dir, animTimer) {
     ctx.beginPath();
     ctx.arc(16, -34, 1.5, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawButcherGroundSprite(x, y, dir, animTimer) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const walkPhase = animTimer * 7;
+  const chopPhase = Math.sin(animTimer * 6);
+
+  // Legs - dark pants with walking animation
+  ctx.fillStyle = '#2a2a2a';
+  const l1 = Math.sin(walkPhase) * 7;
+  const l2 = Math.sin(walkPhase + Math.PI) * 7;
+  ctx.fillRect(-8 + l1, 10, 8, 22);
+  ctx.fillRect(2 + l2, 10, 8, 22);
+  // Black boots
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-9 + l1, 30, 10, 5);
+  ctx.fillRect(1 + l2, 30, 10, 5);
+
+  // Body - dark shirt
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-13, -16, 28, 28);
+
+  // White apron (blood-stained)
+  ctx.fillStyle = '#eee';
+  ctx.fillRect(-10, -10, 22, 22);
+  // Blood stains
+  ctx.fillStyle = '#cc2222';
+  ctx.beginPath();
+  ctx.arc(-4, -4, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(6, 2, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#aa1111';
+  ctx.beginPath();
+  ctx.arc(3, -6, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-6, 5, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Left arm holding knife
+  ctx.save();
+  ctx.translate(-16, -10);
+  ctx.rotate(Math.sin(animTimer * 5) * 0.2);
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(0, 0, 6, 18);
+  // Knife blade
+  ctx.fillStyle = '#ccc';
+  ctx.beginPath();
+  ctx.moveTo(3, 0);
+  ctx.lineTo(5, -22);
+  ctx.lineTo(1, -22);
+  ctx.closePath();
+  ctx.fill();
+  // Knife handle
+  ctx.fillStyle = '#654321';
+  ctx.fillRect(0, -3, 6, 7);
+  ctx.restore();
+
+  // Right arm holding cleaver
+  ctx.save();
+  ctx.translate(14, -10);
+  ctx.rotate(chopPhase * 0.35);
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(0, 0, 6, 18);
+  // Cleaver blade
+  ctx.fillStyle = '#bbb';
+  ctx.fillRect(-2, -20, 10, 16);
+  // Cleaver edge
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(7, -18, 2, 12);
+  // Cleaver handle
+  ctx.fillStyle = '#654321';
+  ctx.fillRect(1, -4, 5, 8);
+  ctx.restore();
+
+  // Head
+  ctx.fillStyle = '#FDBCB4';
+  ctx.beginPath();
+  ctx.arc(1, -24, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Butcher/chef hat
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-10, -40, 22, 8);
+  // Hat puff top
+  ctx.beginPath();
+  ctx.arc(1, -40, 12, Math.PI, 0);
+  ctx.fill();
+  // Hat band
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(-10, -33, 22, 3);
+
+  // Angry eyebrows
+  ctx.strokeStyle = '#3a2a1a';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-8, -30);
+  ctx.lineTo(-2, -28);
+  ctx.moveTo(4, -28);
+  ctx.lineTo(10, -30);
+  ctx.stroke();
+
+  // Beady mean eyes
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-4, -26, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(6, -26, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye glint
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(-3, -27, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(7, -27, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Angry red cheeks
+  ctx.fillStyle = 'rgba(255,60,60,0.4)';
+  ctx.beginPath();
+  ctx.arc(-7, -20, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(9, -20, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Mean mouth - snarl
+  ctx.fillStyle = '#000';
+  const mouthOpen = Math.max(0, chopPhase) * 3;
+  ctx.beginPath();
+  ctx.ellipse(1, -17, 5, 1.5 + mouthOpen, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (mouthOpen > 1) {
+    ctx.fillStyle = '#fff';
+    for (let t = -3; t <= 3; t += 2) {
+      ctx.fillRect(t, -18, 1.5, 2);
+    }
   }
 
   ctx.restore();
@@ -7339,6 +7582,36 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
+  // Draw airplanes
+  for (const plane of airplanes) {
+    ctx.save();
+    ctx.translate(plane.x, plane.y);
+    if (plane.dir < 0) ctx.scale(-1, 1);
+    // Fuselage
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 30, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Wings
+    ctx.fillStyle = '#666';
+    ctx.fillRect(-10, -3, 20, 6);
+    // Tail
+    ctx.beginPath();
+    ctx.moveTo(-28, 0);
+    ctx.lineTo(-35, -12);
+    ctx.lineTo(-25, 0);
+    ctx.fill();
+    // Propeller
+    const propAngle = Date.now() / 30;
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(30, -8 * Math.sin(propAngle));
+    ctx.lineTo(30, 8 * Math.sin(propAngle));
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Falling objects (scaled for mobile)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -7378,6 +7651,40 @@ function drawPlayingScene() {
       ctx.fillText(obj.emoji, obj.x, obj.y);
       ctx.shadowBlur = 0;
     } else if (obj.type === 'butcher') {
+      // Draw parachute if active
+      if (obj.hasParachute) {
+        ctx.save();
+        ctx.translate(obj.x, obj.y - (obj.height || 50)/2 * ms - 15 * ms);
+        const ps = ms; // parachute scale
+        ctx.fillStyle = '#ff4444';
+        ctx.beginPath();
+        ctx.arc(0, -15 * ps, 25 * ps, Math.PI, 0);
+        ctx.fill();
+        // Stripes
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(0, -15 * ps, 25 * ps, Math.PI, Math.PI + 0.5);
+        ctx.lineTo(0, -15 * ps);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, -15 * ps, 25 * ps, Math.PI + 1.0, Math.PI + 1.5);
+        ctx.lineTo(0, -15 * ps);
+        ctx.fill();
+        // Ropes
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-22 * ps, -10 * ps);
+        ctx.lineTo(0, 15 * ps);
+        ctx.moveTo(22 * ps, -10 * ps);
+        ctx.lineTo(0, 15 * ps);
+        ctx.moveTo(-12 * ps, -14 * ps);
+        ctx.lineTo(0, 15 * ps);
+        ctx.moveTo(12 * ps, -14 * ps);
+        ctx.lineTo(0, 15 * ps);
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.font = Math.round((obj.width || 50) * ms) + 'px sans-serif';
       const glowPulse = 8 + 4 * Math.sin(now * 4);
       ctx.shadowColor = '#cc0000';
@@ -7495,6 +7802,10 @@ function drawPlayingScene() {
     } else if (e.type === 'fox') {
       ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
       drawFoxSprite(e.x, e.y, e.dir, e.animTimer);
+      ctx.restore();
+    } else if (e.type === 'butcher_ground') {
+      ctx.save(); ctx.translate(e.x, e.y); ctx.scale(ms, ms); ctx.translate(-e.x, -e.y);
+      drawButcherGroundSprite(e.x, e.y, e.dir, e.animTimer);
       ctx.restore();
     } else {
       ctx.save();
@@ -7806,6 +8117,45 @@ function drawPlayingScene() {
 
   // HUD drawn outside shake transform so it stays stable
   drawHUD();
+
+  // Enemy intro banner
+  if (enemyIntroActive) {
+    const ei = enemyIntroActive;
+    const fadeOut = ei.timer < 0.5 ? ei.timer / 0.5 : 1;
+    const alpha = ei.alpha * fadeOut;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Dark banner across middle of screen
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, HEIGHT / 2 - 50, WIDTH, 100);
+
+    // Border lines
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(10, HEIGHT / 2 - 48, WIDTH - 20, 96);
+
+    // Icon
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ei.icon, WIDTH / 2, HEIGHT / 2 - 10);
+
+    // Name
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#FFD700';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(ei.name, WIDTH / 2, HEIGHT / 2 + 20);
+    ctx.fillText(ei.name, WIDTH / 2, HEIGHT / 2 + 20);
+
+    // Description
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(ei.desc, WIDTH / 2, HEIGHT / 2 + 42);
+
+    ctx.restore();
+  }
 }
 
 // --- Victory Scene Functions ---
@@ -7991,20 +8341,37 @@ function drawVictory() {
   ctx.lineTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 90);
   ctx.stroke();
 
-  // White picket fence
-  ctx.fillStyle = '#fff';
-  for (let x = 20; x < WIDTH - 20; x += 25) {
-    ctx.fillRect(x, HEIGHT - 85, 6, 30);
-    // Pointed top
+  // Barbed wire fence (on top of/replacing picket fence)
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  // Main wire lines (3 horizontal)
+  for (let wireY = 0; wireY < 3; wireY++) {
+    const wy = HEIGHT - 90 - wireY * 20;
     ctx.beginPath();
-    ctx.moveTo(x, HEIGHT - 85);
-    ctx.lineTo(x + 3, HEIGHT - 92);
-    ctx.lineTo(x + 6, HEIGHT - 85);
-    ctx.fill();
+    for (let wx = 0; wx < WIDTH; wx += 5) {
+      ctx.lineTo(wx, wy + Math.sin(wx / 15) * 2);
+    }
+    ctx.stroke();
+    // Barbs every 20px
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1.5;
+    for (let bx = 10; bx < WIDTH; bx += 20) {
+      const by = wy + Math.sin(bx / 15) * 2;
+      ctx.beginPath();
+      ctx.moveTo(bx - 3, by - 4);
+      ctx.lineTo(bx + 3, by + 4);
+      ctx.moveTo(bx + 3, by - 4);
+      ctx.lineTo(bx - 3, by + 4);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 2;
   }
-  // Horizontal rails
-  ctx.fillRect(10, HEIGHT - 75, WIDTH - 20, 4);
-  ctx.fillRect(10, HEIGHT - 62, WIDTH - 20, 4);
+  // Fence posts
+  ctx.fillStyle = '#444';
+  for (let px = 50; px < WIDTH; px += 100) {
+    ctx.fillRect(px - 3, HEIGHT - 130, 6, 60);
+  }
 
   // Flowers
   const flowerColors = ['#FF69B4', '#FF6347', '#FFD700', '#FF4500', '#DA70D6'];
@@ -8017,6 +8384,60 @@ function drawVictory() {
     ctx.fill();
     ctx.fillStyle = '#228B22';
     ctx.fillRect(fx - 1, fy, 2, 8);
+  }
+
+  // Anti-aircraft gun drawing function
+  function drawAAGun(x, y, angle) {
+    ctx.save();
+    ctx.translate(x, y);
+    // Base platform
+    ctx.fillStyle = '#555';
+    ctx.fillRect(-15, 0, 30, 8);
+    // Rotating turret
+    ctx.save();
+    ctx.rotate(angle);
+    // Gun barrel (long)
+    ctx.fillStyle = '#444';
+    ctx.fillRect(0, -3, 35, 6);
+    // Muzzle flash (random)
+    if (Math.random() > 0.7) {
+      ctx.fillStyle = '#ff0';
+      ctx.beginPath();
+      ctx.arc(38, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    // Ammo belt
+    ctx.fillStyle = '#665500';
+    ctx.fillRect(-10, -4, 12, 8);
+    // Small wheels
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(-10, 8, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(10, 8, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Draw 2 AA guns
+  const aaAngle = Math.sin(victoryTimer * 2) * 0.5 - 0.8; // sweeping upward
+  drawAAGun(100, HEIGHT - 135, aaAngle);
+  drawAAGun(WIDTH - 100, HEIGHT - 135, Math.PI + Math.sin(victoryTimer * 2.3) * 0.5 + 0.8);
+
+  // Tracer bullets from AA guns
+  ctx.strokeStyle = '#ff0';
+  ctx.lineWidth = 2;
+  for (let t = 0; t < 3; t++) {
+    const tx = 100 + Math.cos(aaAngle) * (50 + t * 80 + (victoryTimer * 200) % 80);
+    const ty = HEIGHT - 135 + Math.sin(aaAngle) * (50 + t * 80 + (victoryTimer * 200) % 80);
+    if (ty > 0 && ty < HEIGHT) {
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx + Math.cos(aaAngle) * 15, ty + Math.sin(aaAngle) * 15);
+      ctx.stroke();
+    }
   }
 
   // Vegans petting piglets
