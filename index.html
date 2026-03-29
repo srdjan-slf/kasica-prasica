@@ -2510,7 +2510,7 @@ function startLevel() {
     };
     triggerEnemyIntro('vegan');
   }
-  materials = { straw: 0, logs: 0, bricks: 0 };
+  // materials persist between levels (NOT reset here)
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   houses.length = 0;
