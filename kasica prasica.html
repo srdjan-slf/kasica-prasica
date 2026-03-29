@@ -149,7 +149,6 @@
   <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
   <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
   <div class="touch-btn poop-btn" id="btnPoop" data-key="Poop">&#128169;</div>
-  <div class="touch-btn" id="btnHouse" data-key="k" style="width:50px;height:50px;font-size:22px;background:rgba(180,120,60,0.25);border-color:rgba(180,120,60,0.6);">&#127968;</div>
   <div class="shake-col">
     <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
@@ -410,6 +409,7 @@ const game = {
   score: 0,
   level: 1,
   cracks: 0,
+  maxCracks: 3,
   latchedDevil: null,
   levelTimer: 0,
   levelConfig: null,
@@ -432,7 +432,7 @@ let megaPoop = false;
 let shopSkipRect = null;
 
 const SHOP_ITEMS = [
-  { id: 'extraLife', name: 'Extra \u017Divot', desc: 'Popravi jednu pukotinu', icon: '\u2764\uFE0F', cost: 5, effect: function() { game.cracks = Math.max(0, game.cracks - 1); } },
+  { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
   { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
   { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak, +2 prde\u017Ea', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; fartCharges = Math.min(MAX_FARTS, fartCharges + 2); } },
@@ -578,8 +578,16 @@ let houseSpawnTimer = 8; // first house spawns after 8 seconds
 
 const HOUSE_TYPES = {
   straw:  { name: 'Kuća od slame', hp: 2,  wallColor: '#DAA520', roofColor: '#F0E68C', wolfBlows: 1, emoji: '🌾' },
-  sticks: { name: 'Kuća od pruća', hp: 4,  wallColor: '#8B4513', roofColor: '#A0522D', wolfBlows: 3, emoji: '🪵' },
-  brick:  { name: 'Kuća od cigle', hp: 8,  wallColor: '#B22222', roofColor: '#8B0000', wolfBlows: 99, emoji: '🧱' }
+  sticks: { name: 'Kuća od pruća', hp: 3,  wallColor: '#8B4513', roofColor: '#A0522D', wolfBlows: 3, emoji: '🪵' },
+  brick:  { name: 'Kuća od cigle', hp: 6,  wallColor: '#B22222', roofColor: '#8B0000', wolfBlows: 99, emoji: '🧱' }
+};
+
+// Building materials - collected from falling items
+let materials = { straw: 0, logs: 0, bricks: 0 };
+const HOUSE_RECIPES = {
+  straw: { material: 'straw', needed: 5, protection: 2 },
+  sticks: { material: 'logs', needed: 7, protection: 3 },
+  brick: { material: 'bricks', needed: 10, protection: 6 }
 };
 
 // --- Shake Mechanic ---
@@ -2130,10 +2138,10 @@ const SPECIAL_TYPES = [
 function pickCoinType() {
   if (!game.levelConfig) return COIN_TYPES[0];
   const cfg = game.levelConfig;
-  const roll = Math.random();
-  if (roll < cfg.goldChance) return COIN_TYPES[2];
-  if (roll < cfg.goldChance + cfg.billChance) return COIN_TYPES[1];
-  return COIN_TYPES[0];
+  const r = Math.random();
+  if (r < cfg.goldChance * 1.5) return COIN_TYPES[2];      // 50% more gold
+  if (r < cfg.goldChance * 1.5 + cfg.billChance * 1.3) return COIN_TYPES[1]; // 30% more silver
+  return COIN_TYPES[0]; // Less bronze (remainder)
 }
 
 function spawnObject() {
@@ -2169,6 +2177,37 @@ function spawnObject() {
       height: cornSize,
       speed: fallSpeed * 0.8,
       value: 0
+    });
+    return;
+  }
+
+  // Building materials drop (8% chance total)
+  const matRoll = Math.random();
+  if (matRoll < 0.03) {
+    // Brick (rare, 3%)
+    objects.push({
+      type: 'material', materialType: 'bricks',
+      emoji: '🧱', x: Math.random() * (WIDTH - 80) + 40,
+      y: -30, width: 28, height: 28,
+      speed: fallSpeed * 0.85, value: 0
+    });
+    return;
+  } else if (matRoll < 0.06) {
+    // Log (uncommon, 3%)
+    objects.push({
+      type: 'material', materialType: 'logs',
+      emoji: '🪵', x: Math.random() * (WIDTH - 80) + 40,
+      y: -30, width: 30, height: 30,
+      speed: fallSpeed * 0.8, value: 0
+    });
+    return;
+  } else if (matRoll < 0.11) {
+    // Straw (common, 5%)
+    objects.push({
+      type: 'material', materialType: 'straw',
+      emoji: '🌾', x: Math.random() * (WIDTH - 80) + 40,
+      y: -30, width: 26, height: 26,
+      speed: fallSpeed * 0.75, value: 0
     });
     return;
   }
@@ -2355,13 +2394,35 @@ function playKnifeSound() {
   } catch(e) {}
 }
 
+// --- Build House from Materials ---
+function buildHouse(type) {
+  const ht = HOUSE_TYPES[type];
+  const recipe = HOUSE_RECIPES[type];
+  materials[recipe.material] -= recipe.needed;
+  houses.push({
+    type: type,
+    x: player.x,
+    y: HEIGHT - 30,
+    width: 90,
+    height: 80,
+    hp: ht.hp,
+    maxHp: ht.hp,
+    shakeTimer: 0,
+    wolfBlowCount: 0,
+    wolfBlowing: null,
+    attackTimer: 0
+  });
+  spawnScorePopup(player.x, player.y - 60, ht.name + ' izgrađena! ' + ht.emoji, '#FFD700');
+  spawnParticles(player.x, player.y, '🏠', 5, 80);
+  player.inHouse = houses[houses.length - 1];
+}
+
 // --- Level Management ---
 function startLevel() {
   const cfg = getLevelConfig(game.level);
   game.levelConfig = cfg;
   game.levelTimer = cfg.duration;
   game.devilsSpawned = 0;
-  game.cracks = 0;
   game.latchedDevil = null;
   game.lastScore = game.score;
 
@@ -2448,6 +2509,7 @@ function startLevel() {
     };
     triggerEnemyIntro('vegan');
   }
+  materials = { straw: 0, logs: 0, bricks: 0 };
   piggyDamageTimer = 0;
   scoreBounceFactor = 0;
   houses.length = 0;
@@ -2547,44 +2609,6 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
-  // HOUSE SUMMON - K key (buy a house for shelter)
-  // Picks best house you can afford: brick (200) > sticks (100) > straw (50)
-  if ((e.key === 'k' || e.key === 'K') && game.screen === 'playing' && !player.inHouse) {
-    if (houses.length < 1) { // max 1 house at a time
-      let houseType = null;
-      let cost = 0;
-      if (game.score >= 200) { houseType = 'brick'; cost = 200; }
-      else if (game.score >= 100) { houseType = 'sticks'; cost = 100; }
-      else if (game.score >= 50) { houseType = 'straw'; cost = 50; }
-
-      if (houseType) {
-        game.score -= cost;
-        const ht = HOUSE_TYPES[houseType];
-        houses.push({
-          type: houseType,
-          x: player.x,
-          y: HEIGHT - 30,
-          width: 90,
-          height: 80,
-          hp: ht.hp,
-          maxHp: ht.hp,
-          shakeTimer: 0,
-          wolfBlowCount: 0,
-          wolfBlowing: null,
-          attackTimer: 0
-        });
-        spawnScorePopup(player.x, player.y - 50, ht.name + ' (-' + cost + ')', '#FFD700');
-        spawnParticles(player.x, player.y, '🏠', 3, 60);
-        player.inHouse = houses[houses.length - 1]; // auto-enter
-      } else {
-        // Not enough money
-        spawnScorePopup(player.x, player.y - 40, 'Nemaš para! (min 50)', '#ff4444');
-      }
-    } else {
-      spawnScorePopup(player.x, player.y - 40, 'Već imaš kuću!', '#ffaa00');
-    }
-  }
-
   // Fart mechanic - SPACE during gameplay (not while in house)
   if (e.key === ' ' && game.screen === 'playing') {
     if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
@@ -2639,6 +2663,9 @@ window.addEventListener('keydown', (e) => {
       playOink();
       game.score = 0;
       game.level = 1;
+      game.cracks = 0;
+      game.maxCracks = 3;
+      materials = { straw: 0, logs: 0, bricks: 0 };
       playerBTC = 0;
       scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
       startLevel();
@@ -2685,6 +2712,9 @@ canvas.addEventListener('click', () => {
     playOink();
     game.score = 0;
     game.level = 1;
+    game.cracks = 0;
+    game.maxCracks = 3;
+    materials = { straw: 0, logs: 0, bricks: 0 };
     playerBTC = 0;
     scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
     resurrectionCount = 0;
@@ -2749,29 +2779,6 @@ function simulateKeyDown(keyName) {
       shakeVisualOffset = 5;
       shakeVisualTimer = 0.08;
       playShakeSound();
-    }
-  }
-
-  // House summon on K (touch)
-  if (keyName === 'k' && game.screen === 'playing' && !player.inHouse && houses.length < 1) {
-    let houseType = null;
-    let cost = 0;
-    if (game.score >= 200) { houseType = 'brick'; cost = 200; }
-    else if (game.score >= 100) { houseType = 'sticks'; cost = 100; }
-    else if (game.score >= 50) { houseType = 'straw'; cost = 50; }
-    if (houseType) {
-      game.score -= cost;
-      const ht = HOUSE_TYPES[houseType];
-      houses.push({
-        type: houseType, x: player.x, y: HEIGHT - 30,
-        width: 90, height: 80, hp: ht.hp, maxHp: ht.hp,
-        shakeTimer: 0, wolfBlowCount: 0, wolfBlowing: null, attackTimer: 0
-      });
-      spawnScorePopup(player.x, player.y - 50, ht.name + ' (-' + cost + ')', '#FFD700');
-      spawnParticles(player.x, player.y, '\u{1F3E0}', 3, 60);
-      player.inHouse = houses[houses.length - 1];
-    } else {
-      spawnScorePopup(player.x, player.y - 40, 'Nema\u0161 para! (min 50)', '#ff4444');
     }
   }
 
@@ -3155,7 +3162,7 @@ function triggerDamage(fromBomb) {
     playBombExplosion();
   }
 
-  if (game.cracks >= 3) {
+  if (game.cracks >= (game.maxCracks || 3)) {
     isPaused = false;
     game.screen = 'gameOver';
     gameOverTimer = 0;
@@ -3962,6 +3969,23 @@ function update(dt) {
           shakeHintTimer = 0;
           playButcherLatch();
           devilTypeIndicator = { text: '\u{1F52A} KASAPIN!', color: '#cc0000', timer: 2.0 };
+        }
+        objects.splice(i, 1);
+        continue;
+      } else if (obj.type === 'material') {
+        materials[obj.materialType]++;
+        const matNames = { straw: 'Slama', logs: 'Balvan', bricks: 'Cigla' };
+        const matColors = { straw: '#DAA520', logs: '#8B4513', bricks: '#B22222' };
+        spawnScorePopup(obj.x, obj.y, matNames[obj.materialType] + ' +1', matColors[obj.materialType]);
+        playCoinCollect();
+        // Auto-build house when enough materials collected
+        // Check from best to worst
+        if (materials.bricks >= 10 && houses.length === 0) {
+          buildHouse('brick');
+        } else if (materials.logs >= 7 && houses.length === 0) {
+          buildHouse('sticks');
+        } else if (materials.straw >= 5 && houses.length === 0) {
+          buildHouse('straw');
         }
         objects.splice(i, 1);
         continue;
@@ -5989,8 +6013,9 @@ function drawHUD() {
   const crackStartX = WIDTH - 15;
   ctx.font = lifeFont;
   const crackSpacing = mHud ? 36 : 28;
-  for (let i = 0; i < 3; i++) {
-    const cx = crackStartX - (2 - i) * crackSpacing;
+  const maxCr = game.maxCracks || 3;
+  for (let i = 0; i < maxCr; i++) {
+    const cx = crackStartX - (maxCr - 1 - i) * crackSpacing;
     if (i < game.cracks) {
       // Cracked piggy (broken heart)
       ctx.globalAlpha = 0.9;
@@ -6036,6 +6061,32 @@ function drawHUD() {
     if (blink) {
       hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
+  }
+
+  // Building materials display
+  const matY = mHud ? 110 : 95;
+  ctx.font = mHud ? '18px sans-serif' : '14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillText('🌾 ' + materials.straw + '/5', 16, matY + 1);
+  ctx.fillStyle = '#DAA520';
+  ctx.fillText('🌾 ' + materials.straw + '/5', 15, matY);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillText('🪵 ' + materials.logs + '/7', 86, matY + 1);
+  ctx.fillStyle = '#8B4513';
+  ctx.fillText('🪵 ' + materials.logs + '/7', 85, matY);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillText('🧱 ' + materials.bricks + '/10', 156, matY + 1);
+  ctx.fillStyle = '#B22222';
+  ctx.fillText('🧱 ' + materials.bricks + '/10', 155, matY);
+  // House status indicator
+  if (houses.length > 0) {
+    const h = houses[0];
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 246, matY + 1);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 245, matY);
   }
 
   // Poop cooldown indicator
