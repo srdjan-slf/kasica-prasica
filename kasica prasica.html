@@ -148,7 +148,7 @@
 <div id="touchControls">
   <div class="touch-btn" id="btnLeft" data-key="ArrowLeft">&#9664;</div>
   <div class="touch-btn fart-btn" id="btnFart" data-key=" ">&#128168;</div>
-  <div class="touch-btn poop-btn" id="btnPoop" data-key="Poop">&#128169;</div>
+  <div class="touch-btn poop-btn" id="btnPoop" data-key="Shift">&#128169;</div>
   <div class="shake-col">
     <div class="touch-btn" id="btnUp" data-key="ArrowUp">&#9650;</div>
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
@@ -487,6 +487,7 @@ let resurrectionCost = 0;
 
 // --- Pause State ---
 let isPaused = false;
+let showHelp = false;
 
 // Track introduced enemy types for "Who is this?" popups
 const introducedEnemies = {};
@@ -2188,7 +2189,7 @@ function spawnObject() {
     objects.push({
       type: 'material', materialType: 'bricks',
       emoji: '🧱', x: Math.random() * (WIDTH - 80) + 40,
-      y: -30, width: 28, height: 28,
+      y: -30, width: 40, height: 40,
       speed: fallSpeed * 0.85, value: 0
     });
     return;
@@ -2197,7 +2198,7 @@ function spawnObject() {
     objects.push({
       type: 'material', materialType: 'logs',
       emoji: '🪵', x: Math.random() * (WIDTH - 80) + 40,
-      y: -30, width: 30, height: 30,
+      y: -30, width: 42, height: 42,
       speed: fallSpeed * 0.8, value: 0
     });
     return;
@@ -2206,7 +2207,7 @@ function spawnObject() {
     objects.push({
       type: 'material', materialType: 'straw',
       emoji: '🌾', x: Math.random() * (WIDTH - 80) + 40,
-      y: -30, width: 26, height: 26,
+      y: -30, width: 38, height: 38,
       speed: fallSpeed * 0.75, value: 0
     });
     return;
@@ -2523,6 +2524,7 @@ function startLevel() {
   player.facingSmooth = 0;
 
   isPaused = false;
+  showHelp = false;
   game.screen = 'playing';
   startMusic();
 }
@@ -2574,8 +2576,21 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
 
-  // Pause toggle
-  if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && game.screen === 'playing') {
+  // Help overlay - ESC
+  if (e.key === 'Escape' && game.screen === 'playing') {
+    if (showHelp) {
+      showHelp = false;
+      isPaused = false;
+    } else {
+      showHelp = true;
+      isPaused = true;
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // Pause toggle - P only
+  if ((e.key === 'p' || e.key === 'P') && game.screen === 'playing') {
     isPaused = !isPaused;
     e.preventDefault();
     return;
@@ -2884,7 +2899,7 @@ const mobileZones = [
     color: 'rgba(255,220,50,',
     x: PAD, y: JUMP_Y, w: DIR_W, h: JUMP_H },
   // SERI - above DESNO
-  { id: 'poop',  key: 'Poop',       icon: '\uD83D\uDCA9', label: 'SERI',
+  { id: 'poop',  key: 'Shift',       icon: '\uD83D\uDCA9', label: 'SERI',
     color: 'rgba(136,102,0,',
     x: WIDTH - PAD - DIR_W, y: POOP_Y, w: DIR_W, h: POOP_H },
   // DESNO
@@ -2950,7 +2965,7 @@ function activateZone(zone) {
       simulateKeyDown('ArrowUp');
     }
   } else if (zone.id === 'poop') {
-    simulateKeyDown('Poop');
+    simulateKeyDown('Shift');
   } else {
     simulateKeyDown(zone.key);
   }
@@ -2974,7 +2989,7 @@ function deactivateZone(zone) {
     simulateKeyUp('ArrowUp');
     simulateKeyUp('ArrowDown');
   } else if (zone.id === 'poop') {
-    simulateKeyUp('Poop');
+    simulateKeyUp('Shift');
   } else {
     simulateKeyUp(zone.key);
   }
@@ -3628,8 +3643,8 @@ function update(dt) {
   // Update fart cooldown
   if (fartCooldown > 0) fartCooldown -= dt;
 
-  // Poop: both LEFT and RIGHT held simultaneously while grounded (or mobile Poop button) - not in house
-  if ((keys['ArrowLeft'] && keys['ArrowRight'] || keys['Poop']) && player.grounded && poopCooldown <= 0 && !isPooping && !player.inHouse) {
+  // Poop: SHIFT key (or mobile Poop/Shift button) while grounded - not in house
+  if (keys['Shift'] && player.grounded && poopCooldown <= 0 && !isPooping && !player.inHouse) {
     isPooping = true;
     poopAnimTimer = 0.6;
   }
@@ -3977,6 +3992,7 @@ function update(dt) {
         const matNames = { straw: 'Slama', logs: 'Balvan', bricks: 'Cigla' };
         const matColors = { straw: '#DAA520', logs: '#8B4513', bricks: '#B22222' };
         spawnScorePopup(obj.x, obj.y, matNames[obj.materialType] + ' +1', matColors[obj.materialType]);
+        spawnParticles(obj.x, obj.y, obj.emoji, 3, 60);
         playCoinCollect();
         // Auto-build house when enough materials collected
         // Check from best to worst
@@ -6255,6 +6271,12 @@ function drawShop() {
   if (megaPoop) activeText += '\uD83D\uDCA9\uD83D\uDCA9 ';
   if (activeText === 'Aktivno: ') activeText += 'ni\u0161ta';
   ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
+
+  // ESC hint
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.fillText('ESC - pravila i komande', WIDTH - 10, 15);
 }
 
 function handleShopClick(e) {
@@ -6294,6 +6316,109 @@ canvas.addEventListener('click', function(e) {
   }
 });
 
+function drawHelpScreen() {
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('\uD83D\uDC37 PRAVILA I KOMANDE \uD83D\uDC37', WIDTH / 2, 45);
+
+  // Two columns
+  const leftX = WIDTH / 4;
+  const rightX = WIDTH * 3 / 4;
+  let y = 85;
+  const lineH = 22;
+
+  // LEFT COLUMN: Controls
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = '#ff9900';
+  ctx.fillText('\u2328\uFE0F KONTROLE', leftX, y);
+  y += lineH + 5;
+
+  ctx.font = '16px sans-serif';
+  ctx.fillStyle = '#fff';
+  const controls = [
+    ['\u2190 \u2192', 'Kretanje levo/desno'],
+    ['\u2191', 'Skok (preska\u010Duj neprijatelje)'],
+    ['\u2191\u2193', 'Otresanje \u0111avola/kasapina (brzo)'],
+    ['SPACE', 'Prde\u017E (\uD83D\uDCA8 gu\u0161i neprijatelje)'],
+    ['SHIFT', 'Sranje (\uD83D\uDCA9 ubija po zemlji)'],
+    ['ESC', 'Ovo uputstvo'],
+    ['P', 'Pauza'],
+    ['CMD+P', '\uD83E\uDD2B Tajna \u0161ifra...'],
+  ];
+  for (const [key, desc] of controls) {
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'right';
+    ctx.fillText(key, leftX - 10, y);
+    ctx.fillStyle = '#ddd';
+    ctx.textAlign = 'left';
+    ctx.fillText(desc, leftX + 5, y);
+    y += lineH;
+  }
+
+  // RIGHT COLUMN: Game Elements
+  y = 85;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = '#ff9900';
+  ctx.fillText('\uD83C\uDFAE ELEMENTI IGRE', rightX, y);
+  y += lineH + 5;
+
+  ctx.font = '16px sans-serif';
+  const elements = [
+    ['\uD83E\uDE99\uD83E\uDD48\uD83E\uDD47', 'Nov\u010Di\u0107i (1/5/10 poena)'],
+    ['\uD83D\uDCB5\uD83D\uDCB0', 'Nov\u010Danica (20) / Vre\u0107a (30)'],
+    ['\uD83D\uDCA3', 'Bomba - izbegavaj!'],
+    ['\uD83C\uDF3D', 'Kukuruz - dopunjava prde\u017Ee'],
+    ['\uD83C\uDF3E\uD83E\uDEB5\uD83E\uDDF1', 'Materijali za ku\u0107u (5/7/10)'],
+    ['\uD83D\uDE08\uD83D\uDC7F\uD83D\uDD34', '\u0110avoli - \u010Deki\u0107em lome kasicu'],
+    ['\uD83D\uDD2A', 'Kasapin - no\u017Eem napada'],
+    ['\uD83D\uDC3A', 'Vuk - duva ku\u0107ice!'],
+    ['\uD83E\uDD8A', 'Lisica - lukava i brza'],
+    ['\uD83C\uDF56', 'Meso\u017Eder - ho\u0107e pe\u010Denje'],
+    ['\uD83E\uDDD1\u200D\uD83C\uDF3E', 'Farmer - juri svinju'],
+    ['\uD83C\uDF3F', 'Vegan - brani svinju!'],
+    ['\u26A1', 'Munja - skloni se kad bljesne!'],
+  ];
+  for (const [icon, desc] of elements) {
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'right';
+    ctx.fillText(icon, rightX - 10, y);
+    ctx.fillStyle = '#ddd';
+    ctx.textAlign = 'left';
+    ctx.fillText(desc, rightX + 5, y);
+    y += lineH;
+  }
+
+  // Bottom: Houses explanation
+  y = HEIGHT - 80;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillStyle = '#ff9900';
+  ctx.fillText('\uD83C\uDFE0 KU\u0106ICE', WIDTH / 2, y);
+  y += 22;
+  ctx.font = '15px sans-serif';
+  ctx.fillStyle = '#ddd';
+  ctx.fillText('Skupljaj materijale: 5\uD83C\uDF3E = ku\u0107a od slame (2 HP) | 7\uD83E\uDEB5 = brvnara (3 HP) | 10\uD83E\uDDF1 = ku\u0107a od cigle (6 HP)', WIDTH / 2, y);
+  y += 20;
+  ctx.fillText('Vuk duva ku\u0107ice! Slamu oduva odmah, pru\u0107e posle 3 duvanja, cigle NE MO\u017DE!', WIDTH / 2, y);
+
+  // Press ESC to close
+  y = HEIGHT - 15;
+  const pulse = Math.sin(Date.now() / 400) * 0.3 + 0.7;
+  ctx.globalAlpha = pulse;
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('Pritisni ESC za nastavak', WIDTH / 2, y);
+  ctx.globalAlpha = 1;
+}
+
 function draw() {
   if (game.screen === 'nameInput') {
     // nameInput uses HTML overlay, just draw dark background
@@ -6324,6 +6449,9 @@ function draw() {
 
   // Pause overlay (drawn on top of everything)
   drawPauseMenu();
+
+  // Help overlay (drawn on top of pause)
+  if (showHelp) drawHelpScreen();
 }
 
 // --- Pause Menu ---
