@@ -9492,8 +9492,22 @@ function gameLoop(timestamp) {
   if (dt > 0.1) dt = 0.1;
   lastTime = timestamp;
 
-  update(dt);
-  draw();
+  try {
+    update(dt);
+    draw();
+  } catch(err) {
+    // Show error on screen instead of crashing
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillStyle = '#ff0000';
+    ctx.font = '20px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GRESKA: ' + err.message, WIDTH/2, HEIGHT/2 - 20);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px monospace';
+    ctx.fillText(err.stack ? err.stack.split('\n')[1] : '', WIDTH/2, HEIGHT/2 + 20);
+    console.error('Game crash:', err);
+  }
 
   // Show/hide mobile controls based on game state
   const pauseBtnEl = document.getElementById('pauseBtn');
