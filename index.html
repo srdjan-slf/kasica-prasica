@@ -2669,12 +2669,12 @@ window.addEventListener('keydown', (e) => {
   // Don't process gameplay keys while paused
   if (isPaused) return;
 
-  // Wet Fart - CMD/Ctrl + Left/Right
-  if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && game.screen === 'playing') {
+  // Wet Fart - Q (left) / E (right)
+  if ((e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E') && game.screen === 'playing') {
     e.preventDefault();
     if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
       wetFartCharges--;
-      wetFartPendingDir = e.key === 'ArrowLeft' ? -1 : 1;
+      wetFartPendingDir = (e.key === 'q' || e.key === 'Q') ? -1 : 1;
       wetFartInflateTimer = 0.6; // inflate for 0.6 seconds before firing
       // Speech bubble - push directly
       if (speechBubbles.length < 3) {
@@ -6567,7 +6567,7 @@ function drawHelpScreen() {
     ['SHIFT', 'Sranje (\uD83D\uDCA9 ubija po zemlji)'],
     ['ESC', 'Ovo uputstvo'],
     ['P', 'Pauza'],
-    ['CMD/Ctrl+\u2190\u2192', 'Vla\u017Eni prde\u017E (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
+    ['Q / E', 'Vla\u017Eni prde\u017E levo/desno (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
     ['CMD+P', '\uD83E\uDD2B Tajna \u0161ifra...'],
   ];
   for (const [key, desc] of controls) {
