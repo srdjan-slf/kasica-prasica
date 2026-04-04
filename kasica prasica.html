@@ -7148,8 +7148,7 @@ function drawShop() {
     var item = SHOP_ITEMS[i];
     var x = startX + i * (cardW + cardGap);
     var y = cardY;
-    var maxedOut = (item.id === 'extraLife' && (game.maxCracks || 3) >= 6);
-    var canBuy = playerBTC >= item.cost && !maxedOut;
+    var canBuy = playerBTC >= item.cost;
 
     // Card background
     ctx.fillStyle = canBuy ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)';
@@ -7186,7 +7185,16 @@ function drawShop() {
     var buyBtnY = y + (isMobile ? 150 : 125);
     var buyBtnX = x + (isMobile ? 10 : 20);
     var buyBtnW = cardW - (isMobile ? 20 : 40);
-    if (canBuy) {
+    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6);
+    if (isMaxed) {
+      ctx.fillStyle = '#555';
+      ctx.beginPath();
+      ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
+      ctx.fill();
+      ctx.fillStyle = '#aaa';
+      ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
+      ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+    } else if (canBuy) {
       ctx.fillStyle = '#F7931A';
       ctx.beginPath();
       ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
@@ -7257,8 +7265,9 @@ function handleShopClick(e) {
   // Check item buy buttons
   for (var si = 0; si < SHOP_ITEMS.length; si++) {
     var item = SHOP_ITEMS[si];
-    var maxed = (item.id === 'extraLife' && (game.maxCracks || 3) >= 6);
-    if (item._rect && playerBTC >= item.cost && !maxed) {
+    if (item._rect && playerBTC >= item.cost) {
+      // Block only when already at absolute max
+      if (item.id === 'extraLife' && game.maxCracks >= 6) continue;
       var r = item._rect;
       if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
         playerBTC -= item.cost;
