@@ -978,8 +978,8 @@ const BOSS_TYPES = {
   velikiVuk: {
     name: 'VELIKI VUK',
     emoji: '\u{1F43A}',
-    hp: 15, maxHp: 15,
-    speed: 100,
+    hp: 12, maxHp: 12,
+    speed: 80,
     size: 90,
     attacks: ['charge', 'howl', 'summon'],
     level: 3,
@@ -989,8 +989,8 @@ const BOSS_TYPES = {
   megaKasapin: {
     name: 'MEGA KASAPIN',
     emoji: '\u{1F52A}',
-    hp: 25, maxHp: 25,
-    speed: 70,
+    hp: 20, maxHp: 20,
+    speed: 56,
     size: 100,
     attacks: ['knives', 'slam', 'charge'],
     level: 5,
@@ -1000,8 +1000,8 @@ const BOSS_TYPES = {
   kraljDjavola: {
     name: 'KRALJ \u0110AVOLA',
     emoji: '\u{1F47F}',
-    hp: 40, maxHp: 40,
-    speed: 90,
+    hp: 32, maxHp: 32,
+    speed: 72,
     size: 110,
     attacks: ['fireball', 'teleport', 'summon', 'rain'],
     level: 7,
@@ -1011,8 +1011,8 @@ const BOSS_TYPES = {
   zloFarmer: {
     name: 'ZLO FARMER',
     emoji: '\u{1F468}\u200D\u{1F33E}',
-    hp: 20, maxHp: 20,
-    speed: 60,
+    hp: 16, maxHp: 16,
+    speed: 48,
     size: 85,
     attacks: ['pitchfork', 'charge', 'trap'],
     level: 9,
@@ -3630,7 +3630,7 @@ function updateBoss(dt) {
     // Choose random attack
     const attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
     executeBossAttack(boss, attack);
-    boss.attackTimer = boss.phaseTwo ? 1.5 + Math.random() * 1.5 : 2.5 + Math.random() * 2;
+    boss.attackTimer = boss.phaseTwo ? 2 + Math.random() * 2 : 3 + Math.random() * 2.5;
   }
 
   // Boss takes damage from fart clouds
@@ -4221,6 +4221,12 @@ function update(dt) {
   }
   if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
     player.facing = 0;
+  }
+  // Wet fart: turn butt toward firing direction
+  if (wetFartInflateTimer > 0) {
+    // wetFartPendingDir: -1 = fire left, 1 = fire right
+    // Butt is opposite of face, so face OPPOSITE to fire direction
+    player.facing = -wetFartPendingDir;
   }
   player.facingSmooth += (player.facing - player.facingSmooth) * 8 * dt;
   const halfW = player.width / 2;
@@ -7142,7 +7148,8 @@ function drawShop() {
     var item = SHOP_ITEMS[i];
     var x = startX + i * (cardW + cardGap);
     var y = cardY;
-    var canBuy = playerBTC >= item.cost;
+    var maxedOut = (item.id === 'extraLife' && (game.maxCracks || 3) >= 6);
+    var canBuy = playerBTC >= item.cost && !maxedOut;
 
     // Card background
     ctx.fillStyle = canBuy ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)';
@@ -7250,7 +7257,8 @@ function handleShopClick(e) {
   // Check item buy buttons
   for (var si = 0; si < SHOP_ITEMS.length; si++) {
     var item = SHOP_ITEMS[si];
-    if (item._rect && playerBTC >= item.cost) {
+    var maxed = (item.id === 'extraLife' && (game.maxCracks || 3) >= 6);
+    if (item._rect && playerBTC >= item.cost && !maxed) {
       var r = item._rect;
       if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
         playerBTC -= item.cost;
