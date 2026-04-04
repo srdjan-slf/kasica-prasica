@@ -890,6 +890,195 @@ function drawScorePopups() {
   ctx.lineWidth = 1;
 }
 
+// --- Biome System ---
+const BIOMES = {
+  livada: {
+    name: 'Livada',
+    skyTop: '#87CEEB', skyBottom: '#5BA3CF',
+    groundColor: '#4CAF50', groundStripe: '#43A047',
+    groundEmoji: '\u{1F33F}', cloudColor: 'rgba(255,255,255,',
+    sunColor: '#FFD700', hasSnow: false, hasLava: false,
+    ambientParticles: null
+  },
+  suma: {
+    name: '\u0160uma',
+    skyTop: '#2E8B57', skyBottom: '#1B4332',
+    groundColor: '#2D5016', groundStripe: '#1E3A0E',
+    groundEmoji: '\u{1F332}', cloudColor: 'rgba(200,230,200,',
+    sunColor: '#90EE90', hasSnow: false, hasLava: false,
+    ambientParticles: 'leaves'
+  },
+  grad: {
+    name: 'Grad',
+    skyTop: '#4A4A6A', skyBottom: '#2C2C3E',
+    groundColor: '#555555', groundStripe: '#444444',
+    groundEmoji: '\u{1F3E2}', cloudColor: 'rgba(150,150,170,',
+    sunColor: '#FF6B35', hasSnow: false, hasLava: false,
+    ambientParticles: 'smog'
+  },
+  pakao: {
+    name: 'Pakao',
+    skyTop: '#1A0000', skyBottom: '#4A0000',
+    groundColor: '#2A0A00', groundStripe: '#3A1500',
+    groundEmoji: '\u{1F525}', cloudColor: 'rgba(255,80,0,',
+    sunColor: '#FF2200', hasSnow: false, hasLava: true,
+    ambientParticles: 'embers'
+  },
+  oblaci: {
+    name: 'Oblaci',
+    skyTop: '#E8F0FF', skyBottom: '#B0D0FF',
+    groundColor: '#D0E0FF', groundStripe: '#C0D0F0',
+    groundEmoji: '\u2601\uFE0F', cloudColor: 'rgba(255,255,255,',
+    sunColor: '#FFD700', hasSnow: false, hasLava: false,
+    ambientParticles: 'sparkles'
+  },
+  sneg: {
+    name: 'Sne\u017Ena Planina',
+    skyTop: '#B0C4DE', skyBottom: '#708090',
+    groundColor: '#E8E8F0', groundStripe: '#D0D0E0',
+    groundEmoji: '\u2744\uFE0F', cloudColor: 'rgba(220,220,240,',
+    sunColor: '#ADD8E6', hasSnow: true, hasLava: false,
+    ambientParticles: 'snow'
+  }
+};
+
+const BIOME_ORDER = ['livada', 'suma', 'grad', 'sneg', 'pakao', 'oblaci'];
+
+function getBiomeForLevel(level) {
+  if (level <= 2) return BIOMES.livada;
+  const idx = Math.min(BIOME_ORDER.length - 1, Math.floor((level - 1) / 2));
+  return BIOMES[BIOME_ORDER[idx]];
+}
+
+let currentBiome = BIOMES.livada;
+let ambientParticles = [];
+
+function initAmbientParticles() {
+  ambientParticles = [];
+  if (!currentBiome.ambientParticles) return;
+  for (let i = 0; i < 15; i++) {
+    ambientParticles.push({
+      x: Math.random() * WIDTH,
+      y: Math.random() * HEIGHT,
+      size: 2 + Math.random() * 4,
+      speed: 10 + Math.random() * 30,
+      drift: (Math.random() - 0.5) * 20,
+      opacity: 0.3 + Math.random() * 0.5
+    });
+  }
+}
+
+// --- Boss Fight System ---
+let boss = null;
+let bossActive = false;
+let bossDefeatedThisLevel = false;
+let bossProjectiles = [];
+
+const BOSS_TYPES = {
+  velikiVuk: {
+    name: 'VELIKI VUK',
+    emoji: '\u{1F43A}',
+    hp: 15, maxHp: 15,
+    speed: 100,
+    size: 90,
+    attacks: ['charge', 'howl', 'summon'],
+    level: 3,
+    color: '#555',
+    reward: 15
+  },
+  megaKasapin: {
+    name: 'MEGA KASAPIN',
+    emoji: '\u{1F52A}',
+    hp: 25, maxHp: 25,
+    speed: 70,
+    size: 100,
+    attacks: ['knives', 'slam', 'charge'],
+    level: 5,
+    color: '#8B0000',
+    reward: 25
+  },
+  kraljDjavola: {
+    name: 'KRALJ \u0110AVOLA',
+    emoji: '\u{1F47F}',
+    hp: 40, maxHp: 40,
+    speed: 90,
+    size: 110,
+    attacks: ['fireball', 'teleport', 'summon', 'rain'],
+    level: 7,
+    color: '#440000',
+    reward: 40
+  },
+  zloFarmer: {
+    name: 'ZLO FARMER',
+    emoji: '\u{1F468}\u200D\u{1F33E}',
+    hp: 20, maxHp: 20,
+    speed: 60,
+    size: 85,
+    attacks: ['pitchfork', 'charge', 'trap'],
+    level: 9,
+    color: '#4A3000',
+    reward: 30
+  }
+};
+
+function getBossForLevel(level) {
+  if (level === 3) return 'velikiVuk';
+  if (level === 5) return 'megaKasapin';
+  if (level === 7) return 'kraljDjavola';
+  if (level === 9) return 'zloFarmer';
+  return null;
+}
+
+function isBossLevel(level) {
+  return getBossForLevel(level) !== null;
+}
+
+// --- Power-up Drops ---
+let activePowerUps = [];  // active power-up effects on player
+let powerUpDrops = [];    // falling power-up items
+
+const POWER_UP_TYPES = {
+  magnet: {
+    name: 'Magnet',
+    emoji: '\u{1F9F2}',
+    color: '#FF4444',
+    duration: 8,
+    desc: 'Privla\u010Di nov\u010Di\u0107e!'
+  },
+  invisibility: {
+    name: 'Nevidljivost',
+    emoji: '\u{1F47B}',
+    color: '#AA88FF',
+    duration: 5,
+    desc: 'Neprijatelji te ne vide!'
+  },
+  speedBoost: {
+    name: 'Turbo',
+    emoji: '\u26A1',
+    color: '#FFDD00',
+    duration: 6,
+    desc: 'Dupla brzina!'
+  },
+  freeze: {
+    name: 'Zamrzavanje',
+    emoji: '\u2744\uFE0F',
+    color: '#88DDFF',
+    duration: 4,
+    desc: 'Zamrzni sve neprijatelje!'
+  },
+  coinRain: {
+    name: 'Ki\u0161a Para',
+    emoji: '\u{1F4B0}',
+    color: '#FFD700',
+    duration: 5,
+    desc: 'Ki\u0161a zlatnika!'
+  }
+};
+
+function hasPowerUp(type) {
+  return activePowerUps.some(p => p.type === type);
+}
+
 // --- Sky & Weather ---
 const skyClouds = [];
 for (let i = 0; i < 5; i++) {
@@ -2491,6 +2680,50 @@ function startLevel() {
   game.latchedDevil = null;
   game.lastScore = game.score;
 
+  // Set biome for this level
+  currentBiome = getBiomeForLevel(game.level);
+  initAmbientParticles();
+
+  // Boss setup
+  boss = null;
+  bossActive = false;
+  bossDefeatedThisLevel = false;
+  bossProjectiles = [];
+  const bossKey = getBossForLevel(game.level);
+  if (bossKey) {
+    const bt = BOSS_TYPES[bossKey];
+    boss = {
+      type: bossKey,
+      name: bt.name,
+      emoji: bt.emoji,
+      hp: bt.hp, maxHp: bt.maxHp,
+      x: WIDTH / 2, y: -bt.size,
+      width: bt.size, height: bt.size,
+      size: bt.size,
+      speed: bt.speed,
+      attacks: bt.attacks,
+      color: bt.color,
+      reward: bt.reward,
+      state: 'entering', // entering, fighting, dying
+      attackTimer: 3,
+      currentAttack: null,
+      attackAnimTimer: 0,
+      dir: 1,
+      targetX: WIDTH / 2,
+      stunTimer: 0,
+      hitFlash: 0,
+      phaseTwo: false, // below 50% hp
+      deathTimer: 0,
+      shakeTimer: 0
+    };
+    // Boss levels get extra time
+    game.levelTimer += 15;
+  }
+
+  // Power-ups reset
+  powerUpDrops = [];
+  // Don't clear activePowerUps - let them carry over briefly
+
   // Calculate devil spawn schedule - start early, come in waves!
   game.devilSchedule = [];
   if (cfg.devilCount > 0) {
@@ -3325,6 +3558,241 @@ function triggerDamage(fromBomb) {
   }
 }
 
+// --- Boss AI & Update ---
+function updateBoss(dt) {
+  if (!boss) return;
+  boss.hitFlash = Math.max(0, boss.hitFlash - dt);
+  boss.shakeTimer = Math.max(0, boss.shakeTimer - dt);
+
+  if (boss.state === 'entering') {
+    // Fly in from top
+    boss.y += 80 * dt;
+    if (boss.y >= 60) {
+      boss.y = 60;
+      boss.state = 'fighting';
+      bossActive = true;
+      triggerEnemyIntro(boss.type === 'velikiVuk' ? 'wolf' : boss.type === 'megaKasapin' ? 'butcher' : boss.type === 'kraljDjavola' ? 'devil_fast' : 'farmer');
+      spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u26A0\uFE0F BOSS: ' + boss.name + ' \u26A0\uFE0F', '#FF0000');
+      triggerScreenShake(10, 0.5);
+    }
+    return;
+  }
+
+  if (boss.state === 'dying') {
+    boss.deathTimer += dt;
+    boss.y -= 30 * dt;
+    if (boss.deathTimer > 3) {
+      boss.state = 'dead';
+      bossDefeatedThisLevel = true;
+      bossActive = false;
+      playerBTC += boss.reward;
+      spawnScorePopup(boss.x, boss.y, '+' + boss.reward + ' \u20BF BOSS DEFEATED!', '#FFD700');
+      for (let i = 0; i < 20; i++) {
+        spawnParticles(boss.x + (Math.random()-0.5)*80, boss.y + (Math.random()-0.5)*80, '\u{1F4A5}', 1, 200);
+      }
+      triggerScreenShake(15, 0.8);
+      boss = null;
+    }
+    return;
+  }
+
+  // Phase two at 50% hp
+  if (!boss.phaseTwo && boss.hp <= boss.maxHp / 2) {
+    boss.phaseTwo = true;
+    boss.speed *= 1.4;
+    spawnScorePopup(boss.x, boss.y - 40, 'PHASE 2! \u{1F525}', '#FF4400');
+    triggerScreenShake(8, 0.4);
+  }
+
+  // Frozen check
+  if (boss.stunTimer > 0) {
+    boss.stunTimer -= dt;
+    return;
+  }
+
+  // Movement AI
+  const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
+  if (Math.abs(boss.x - boss.targetX) > 10) {
+    boss.dir = boss.targetX > boss.x ? 1 : -1;
+    boss.x += moveSpeed * boss.dir * dt;
+  } else {
+    // Pick new target
+    if (Math.random() < 0.02) {
+      boss.targetX = 60 + Math.random() * (WIDTH - 120);
+    }
+  }
+  boss.x = Math.max(boss.size / 2, Math.min(WIDTH - boss.size / 2, boss.x));
+
+  // Attack timer
+  boss.attackTimer -= dt;
+  if (boss.attackTimer <= 0) {
+    // Choose random attack
+    const attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
+    executeBossAttack(boss, attack);
+    boss.attackTimer = boss.phaseTwo ? 1.5 + Math.random() * 1.5 : 2.5 + Math.random() * 2;
+  }
+
+  // Boss takes damage from fart clouds
+  for (let i = fartClouds.length - 1; i >= 0; i--) {
+    const fc = fartClouds[i];
+    if (Math.abs(fc.x - boss.x) < boss.size && Math.abs(fc.y - boss.y) < boss.size) {
+      damageBoss(2);
+      fartClouds.splice(i, 1);
+    }
+  }
+  // Boss takes damage from wet fart projectiles
+  for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
+    const wf = wetFartProjectiles[i];
+    if (Math.abs(wf.x - boss.x) < boss.size && Math.abs(wf.y - boss.y) < boss.size) {
+      damageBoss(3);
+      wetFartProjectiles.splice(i, 1);
+    }
+  }
+  // Boss takes damage from poops (if it's near ground)
+  for (const poop of poops) {
+    if (boss.y > HEIGHT - 120 && Math.abs(poop.x - boss.x) < boss.size) {
+      damageBoss(1);
+      poop.life = 0;
+    }
+  }
+}
+
+function damageBoss(amount) {
+  if (!boss || boss.state !== 'fighting') return;
+  boss.hp -= amount;
+  boss.hitFlash = 0.2;
+  boss.shakeTimer = 0.15;
+  spawnParticles(boss.x, boss.y, '\u{1F4A5}', 2, 80);
+  if (boss.hp <= 0) {
+    boss.hp = 0;
+    boss.state = 'dying';
+    boss.deathTimer = 0;
+  }
+}
+
+function executeBossAttack(boss, attack) {
+  const px = player.x;
+  switch (attack) {
+    case 'charge': // Rush toward player
+      boss.targetX = px;
+      boss.speed *= 2;
+      setTimeout(() => { if (boss) boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : boss.speed / 2; }, 1500);
+      break;
+    case 'howl': // Summon 2 wolves
+      for (let i = 0; i < 2; i++) {
+        const fromLeft = Math.random() > 0.5;
+        groundEnemies.push({
+          type: 'wolf', emoji: '\u{1F43A}',
+          x: fromLeft ? -30 : WIDTH + 30,
+          y: HEIGHT - 55, width: 50, height: 50,
+          speed: 80, dir: fromLeft ? 1 : -1,
+          ai: 'straight', pauseTimer: 0, frozen: 0, nameTimer: 0
+        });
+      }
+      spawnScorePopup(boss.x, boss.y - 30, 'AUUUUU! \u{1F43A}', '#888');
+      break;
+    case 'summon': // Summon minions
+      for (let i = 0; i < (boss.phaseTwo ? 3 : 2); i++) {
+        objects.push({
+          type: 'devil', devilType: 'fast',
+          x: boss.x + (Math.random()-0.5) * 100,
+          y: boss.y + 20,
+          width: 35, height: 35,
+          speed: 200, value: 0,
+          emoji: '\u{1F608}'
+        });
+      }
+      break;
+    case 'knives': // Throw knives in spread
+      const count = boss.phaseTwo ? 5 : 3;
+      for (let i = 0; i < count; i++) {
+        const angle = -Math.PI / 2 + (i - (count-1)/2) * 0.3;
+        bossProjectiles.push({
+          x: boss.x, y: boss.y + boss.size / 2,
+          vx: Math.cos(angle) * 200,
+          vy: Math.sin(angle) * 200 + 100,
+          life: 3, emoji: '\u{1F52A}', size: 20
+        });
+      }
+      break;
+    case 'slam': // Jump to player position
+      boss.targetX = px;
+      boss.speed = 400;
+      setTimeout(() => {
+        if (boss) {
+          boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
+          triggerScreenShake(12, 0.5);
+          // Damage if player is near
+          if (Math.abs(boss.x - player.x) < 80) triggerDamage(false);
+        }
+      }, 800);
+      break;
+    case 'fireball': // Fire projectile at player
+      const dx = px - boss.x;
+      const dy = (HEIGHT - 70) - boss.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      bossProjectiles.push({
+        x: boss.x, y: boss.y + boss.size / 2,
+        vx: (dx / dist) * 250,
+        vy: (dy / dist) * 250,
+        life: 3, emoji: '\u{1F525}', size: 25
+      });
+      if (boss.phaseTwo) {
+        // Triple fireball in phase 2
+        bossProjectiles.push({
+          x: boss.x - 30, y: boss.y + boss.size / 2,
+          vx: (dx / dist) * 220 - 40,
+          vy: (dy / dist) * 220,
+          life: 3, emoji: '\u{1F525}', size: 22
+        });
+        bossProjectiles.push({
+          x: boss.x + 30, y: boss.y + boss.size / 2,
+          vx: (dx / dist) * 220 + 40,
+          vy: (dy / dist) * 220,
+          life: 3, emoji: '\u{1F525}', size: 22
+        });
+      }
+      break;
+    case 'teleport': // Teleport to random position
+      boss.x = 60 + Math.random() * (WIDTH - 120);
+      spawnParticles(boss.x, boss.y, '\u{1F4A8}', 5, 120);
+      // Immediate follow-up attack
+      boss.attackTimer = 0.5;
+      break;
+    case 'rain': // Rain of fire from sky
+      for (let i = 0; i < (boss.phaseTwo ? 8 : 5); i++) {
+        setTimeout(() => {
+          if (boss && boss.state === 'fighting') {
+            bossProjectiles.push({
+              x: Math.random() * WIDTH,
+              y: -20,
+              vx: 0, vy: 200 + Math.random() * 100,
+              life: 3, emoji: '\u{1F525}', size: 20
+            });
+          }
+        }, i * 200);
+      }
+      break;
+    case 'pitchfork': // Throw pitchfork
+      bossProjectiles.push({
+        x: boss.x, y: boss.y + boss.size / 2,
+        vx: (px - boss.x) * 0.8,
+        vy: 180,
+        life: 3, emoji: '\u{1F531}', size: 25
+      });
+      break;
+    case 'trap': // Place trap on ground
+      poops.push({
+        x: px + (Math.random()-0.5) * 100,
+        y: HEIGHT - 35,
+        width: 30, height: 25,
+        life: 6, stinkTimer: 0,
+        isTrap: true, emoji: '\u{1FAA4}'
+      });
+      break;
+  }
+}
+
 function update(dt) {
   // nameInput and shop screens don't need updates
   if (game.screen === 'nameInput' || game.screen === 'shop') return;
@@ -3588,8 +4056,118 @@ function update(dt) {
     }
   }
 
+  // --- Update Ambient Particles ---
+  for (const p of ambientParticles) {
+    p.y += p.speed * dt;
+    p.x += p.drift * dt + Math.sin(Date.now() / 1000 + p.x) * 0.5;
+    if (p.y > HEIGHT + 10) { p.y = -10; p.x = Math.random() * WIDTH; }
+    if (p.x < -10) p.x = WIDTH + 10;
+    if (p.x > WIDTH + 10) p.x = -10;
+  }
+
+  // --- Update Active Power-ups ---
+  for (let i = activePowerUps.length - 1; i >= 0; i--) {
+    activePowerUps[i].timer -= dt;
+    if (activePowerUps[i].timer <= 0) {
+      activePowerUps.splice(i, 1);
+    }
+  }
+
+  // --- Update Falling Power-up Drops ---
+  for (let i = powerUpDrops.length - 1; i >= 0; i--) {
+    const pu = powerUpDrops[i];
+    pu.y += pu.speed * dt;
+    pu.bobTimer = (pu.bobTimer || 0) + dt;
+    // Player collision
+    if (aabb(player, pu) && !hasPowerUp(pu.powerType)) {
+      activePowerUps.push({
+        type: pu.powerType,
+        timer: POWER_UP_TYPES[pu.powerType].duration,
+        maxTimer: POWER_UP_TYPES[pu.powerType].duration
+      });
+      spawnScorePopup(pu.x, pu.y - 20, POWER_UP_TYPES[pu.powerType].name + '!', POWER_UP_TYPES[pu.powerType].color);
+      spawnParticles(pu.x, pu.y, POWER_UP_TYPES[pu.powerType].emoji, 5, 100);
+      // Freeze effect: stun all enemies
+      if (pu.powerType === 'freeze') {
+        for (const ge of groundEnemies) ge.frozen = 4;
+        triggerScreenShake(5, 0.3);
+      }
+      powerUpDrops.splice(i, 1);
+      continue;
+    }
+    if (pu.y > HEIGHT + 30) { powerUpDrops.splice(i, 1); }
+  }
+
+  // Magnet effect: attract coins toward player
+  if (hasPowerUp('magnet')) {
+    for (const obj of objects) {
+      if (obj.type === 'coin' || obj.type === 'bill' || obj.type === 'moneybag' || obj.type === 'gold') {
+        const dx = player.x - obj.x;
+        const dy = player.y - obj.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 200 && dist > 5) {
+          obj.x += (dx / dist) * 250 * dt;
+          obj.y += (dy / dist) * 250 * dt;
+        }
+      }
+    }
+  }
+
+  // Coin rain power-up: extra coins
+  if (hasPowerUp('coinRain') && Math.random() < 0.1) {
+    const ct = pickCoinType();
+    objects.push({
+      type: 'coin', emoji: ct.emoji,
+      x: Math.random() * (WIDTH - 40) + 20,
+      y: -20, width: ct.size, height: ct.size,
+      speed: (game.levelConfig ? game.levelConfig.fallSpeed : 150) * 0.7,
+      value: ct.value
+    });
+  }
+
+  // Spawn power-up drops occasionally (from level 2+, not during boss)
+  if (game.level >= 2 && !bossActive && Math.random() < 0.0008) {
+    const types = Object.keys(POWER_UP_TYPES);
+    const pType = types[Math.floor(Math.random() * types.length)];
+    const pt = POWER_UP_TYPES[pType];
+    powerUpDrops.push({
+      powerType: pType,
+      emoji: pt.emoji,
+      x: Math.random() * (WIDTH - 60) + 30,
+      y: -30,
+      width: 35, height: 35,
+      speed: 60 + Math.random() * 30,
+      bobTimer: 0
+    });
+  }
+
+  // --- Boss Update ---
+  if (boss && boss.state !== 'dead') {
+    updateBoss(dt);
+  }
+  // Update boss projectiles
+  for (let i = bossProjectiles.length - 1; i >= 0; i--) {
+    const bp = bossProjectiles[i];
+    bp.x += bp.vx * dt;
+    bp.y += bp.vy * dt;
+    bp.life -= dt;
+    if (bp.life <= 0 || bp.y > HEIGHT + 20 || bp.x < -20 || bp.x > WIDTH + 20) {
+      bossProjectiles.splice(i, 1);
+      continue;
+    }
+    // Hit player
+    if (!hasPowerUp('invisibility') && Math.abs(bp.x - player.x) < 30 && Math.abs(bp.y - player.y) < 30) {
+      triggerDamage(false);
+      bossProjectiles.splice(i, 1);
+    }
+  }
+
   // Level timer countdown
   game.levelTimer -= dt;
+  // Boss levels: don't end until boss is defeated
+  if (boss && !bossDefeatedThisLevel && game.levelTimer < 5) {
+    game.levelTimer = 5; // Keep going until boss is dead
+  }
   if (game.levelTimer <= 0) {
     game.levelTimer = 0;
     objects.length = 0;
@@ -3630,13 +4208,14 @@ function update(dt) {
     return;
   }
 
-  // Player movement
+  // Player movement (speed boost from power-up)
+  const moveSpeed = player.speed * (hasPowerUp('speedBoost') ? 2 : 1);
   if (keys['ArrowLeft']) {
-    player.x -= player.speed * dt;
+    player.x -= moveSpeed * dt;
     player.facing = -1;
   }
   if (keys['ArrowRight']) {
-    player.x += player.speed * dt;
+    player.x += moveSpeed * dt;
     player.facing = 1;
   }
   if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
@@ -4451,29 +5030,36 @@ function update(dt) {
       }
     }
 
-    switch (e.ai) {
-      case 'straight':
-        e.x += e.speed * e.dir * dt;
-        break;
-      case 'chase':
-        e.dir = player.x > e.x ? 1 : -1;
-        e.x += e.speed * e.dir * dt;
-        break;
-      case 'cunning':
-        if (e.pauseTimer > 0) {
-          e.pauseTimer -= dt;
-        } else {
+    // Freeze/stun check
+    if (e.frozen > 0) {
+      e.frozen -= dt;
+    } else if (hasPowerUp('freeze')) {
+      // Don't move while freeze power-up is active
+    } else {
+      switch (e.ai) {
+        case 'straight':
           e.x += e.speed * e.dir * dt;
-          if (Math.random() < 0.005) {
-            e.pauseTimer = 0.3 + Math.random() * 0.5;
-            e.dir *= -1;
+          break;
+        case 'chase':
+          e.dir = player.x > e.x ? 1 : -1;
+          e.x += e.speed * e.dir * dt;
+          break;
+        case 'cunning':
+          if (e.pauseTimer > 0) {
+            e.pauseTimer -= dt;
+          } else {
+            e.x += e.speed * e.dir * dt;
+            if (Math.random() < 0.005) {
+              e.pauseTimer = 0.3 + Math.random() * 0.5;
+              e.dir *= -1;
+            }
           }
-        }
-        break;
-      case 'relentless':
-        e.dir = player.x > e.x ? 1 : -1;
-        e.x += e.speed * e.dir * dt;
-        break;
+          break;
+        case 'relentless':
+          e.dir = player.x > e.x ? 1 : -1;
+          e.x += e.speed * e.dir * dt;
+          break;
+      }
     }
 
     // Remove if off-screen (only for straight runners, others stay)
@@ -4487,8 +5073,8 @@ function update(dt) {
     }
 
     // Collision with player - ONLY if player is on or near ground level
-    // (player can jump OVER them)
-    if (player.grounded && aabb(player, e)) {
+    // (player can jump OVER them, invisibility protects)
+    if (player.grounded && !hasPowerUp('invisibility') && aabb(player, e)) {
       if (player.inHouse && player.inHouse.hp > 0) {
         // Player is sheltered - redirect damage to house
         player.inHouse.hp--;
@@ -4509,6 +5095,13 @@ function update(dt) {
     poop.life -= dt;
     poop.stinkTimer += dt;
     if (poop.life <= 0) { poops.splice(p, 1); continue; }
+
+    // Trap poops (from boss farmer) damage player
+    if (poop.isTrap && player.grounded && aabb(player, poop)) {
+      triggerDamage(false);
+      poops.splice(p, 1);
+      continue;
+    }
 
     for (let e = groundEnemies.length - 1; e >= 0; e--) {
       if (aabb(poop, groundEnemies[e])) {
@@ -4674,16 +5267,36 @@ function playVeganDeathSound() {
 
 // --- Draw ---
 function drawBackground() {
-  // Vertical sky gradient
+  const b = currentBiome;
+  // Vertical sky gradient using biome colors
   const grad = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-  grad.addColorStop(0, '#87CEEB');
-  grad.addColorStop(1, '#5BA3CF');
+  grad.addColorStop(0, b.skyTop);
+  grad.addColorStop(1, b.skyBottom);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Draw fluffy clouds (3 overlapping circles each)
+  // Lava glow for pakao biome
+  if (b.hasLava) {
+    const lavaGrad = ctx.createLinearGradient(0, HEIGHT - 80, 0, HEIGHT);
+    lavaGrad.addColorStop(0, 'rgba(255,50,0,0)');
+    lavaGrad.addColorStop(1, 'rgba(255,80,0,0.4)');
+    ctx.fillStyle = lavaGrad;
+    ctx.fillRect(0, HEIGHT - 80, WIDTH, 80);
+    // Flickering lava pools
+    const t = Date.now() / 1000;
+    for (let i = 0; i < 6; i++) {
+      const lx = (i * WIDTH / 5 + Math.sin(t + i) * 20) % WIDTH;
+      const lo = 0.2 + Math.sin(t * 2 + i * 1.5) * 0.15;
+      ctx.fillStyle = `rgba(255, ${60 + Math.sin(t * 3 + i) * 40}, 0, ${lo})`;
+      ctx.beginPath();
+      ctx.ellipse(lx, HEIGHT - 20, 30 + Math.sin(t + i) * 10, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Draw fluffy clouds using biome cloud color
   for (const cloud of skyClouds) {
-    ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`;
+    ctx.fillStyle = b.cloudColor + cloud.opacity + ')';
     ctx.beginPath();
     ctx.arc(cloud.x, cloud.y, cloud.w * 0.25, 0, Math.PI * 2);
     ctx.arc(cloud.x + cloud.w * 0.25, cloud.y - cloud.w * 0.12, cloud.w * 0.3, 0, Math.PI * 2);
@@ -4691,12 +5304,12 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // Sun in top-right corner with rotating rays
-  ctx.fillStyle = '#FFD700';
+  // Sun/moon using biome sun color
+  ctx.fillStyle = b.sunColor;
   ctx.beginPath();
   ctx.arc(WIDTH - 60, 50, 30, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#FFD700';
+  ctx.strokeStyle = b.sunColor;
   ctx.lineWidth = 2;
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2 + Date.now() / 3000;
@@ -4705,28 +5318,66 @@ function drawBackground() {
     ctx.lineTo(WIDTH - 60 + Math.cos(angle) * 48, 50 + Math.sin(angle) * 48);
     ctx.stroke();
   }
+
+  // Ambient particles (biome-specific)
+  drawAmbientParticles();
+}
+
+function drawAmbientParticles() {
+  const type = currentBiome.ambientParticles;
+  if (!type) return;
+  const t = Date.now() / 1000;
+  for (const p of ambientParticles) {
+    ctx.globalAlpha = p.opacity;
+    if (type === 'leaves') {
+      ctx.fillStyle = `hsl(${100 + Math.sin(t + p.x) * 30}, 60%, 35%)`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * 0.5, Math.sin(t + p.x) * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'snow') {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'embers') {
+      ctx.fillStyle = `rgb(255, ${100 + Math.sin(t * 3 + p.x) * 60}, 0)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'smog') {
+      ctx.fillStyle = `rgba(100, 100, 100, ${p.opacity * 0.3})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'sparkles') {
+      const sparkle = Math.sin(t * 4 + p.x * 0.1) > 0.5 ? 1 : 0.2;
+      ctx.fillStyle = `rgba(255, 255, 200, ${sparkle * p.opacity})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawGround() {
+  const b = currentBiome;
   const groundY = HEIGHT - 40;
   const groundHeight = 40;
-  // Base green
-  ctx.fillStyle = '#4CAF50';
+  ctx.fillStyle = b.groundColor;
   ctx.fillRect(0, groundY, WIDTH, groundHeight);
-  // Darker stripe pattern for grass
-  ctx.fillStyle = '#43A047';
+  ctx.fillStyle = b.groundStripe;
   for (let x = 0; x < WIDTH; x += 20) {
     if ((x / 20) % 2 === 0) {
       ctx.fillRect(x, groundY, 10, groundHeight);
     }
   }
-  // Scattered grass emoji
   ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.globalAlpha = 0.5;
   for (let x = 15; x < WIDTH; x += 55) {
-    ctx.fillText('\u{1F33F}', x, groundY + 6);
+    ctx.fillText(b.groundEmoji, x, groundY + 6);
   }
   ctx.globalAlpha = 1.0;
 }
@@ -6069,12 +6720,102 @@ function drawPiggySprite(x, y, facing, state) {
   ctx.restore();
 }
 
+function drawBoss() {
+  if (!boss) return;
+  const t = Date.now() / 1000;
+  const shk = boss.shakeTimer > 0 ? (Math.random() - 0.5) * 6 : 0;
+  const bx = boss.x + shk;
+  const by = boss.y;
+
+  ctx.save();
+
+  // Death animation: fade + shrink
+  if (boss.state === 'dying') {
+    const dp = boss.deathTimer / 3;
+    ctx.globalAlpha = 1 - dp;
+    ctx.translate(bx, by);
+    ctx.scale(1 - dp * 0.5, 1 - dp * 0.5);
+    ctx.translate(-bx, -by);
+  }
+
+  // Dark aura
+  const auraSize = boss.size * (boss.phaseTwo ? 1.3 : 1.0);
+  const auraGrad = ctx.createRadialGradient(bx, by, 0, bx, by, auraSize);
+  auraGrad.addColorStop(0, boss.phaseTwo ? 'rgba(255,0,0,0.3)' : 'rgba(0,0,0,0.3)');
+  auraGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = auraGrad;
+  ctx.beginPath();
+  ctx.arc(bx, by, auraSize, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hit flash
+  if (boss.hitFlash > 0) {
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 20;
+  }
+
+  // Boss emoji (large)
+  ctx.font = (boss.size * 0.7) + 'px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(boss.emoji, bx, by);
+  ctx.shadowBlur = 0;
+
+  // Phase 2 fire effect
+  if (boss.phaseTwo) {
+    ctx.font = '20px sans-serif';
+    for (let i = 0; i < 4; i++) {
+      const fx = bx + Math.sin(t * 3 + i * 1.5) * (boss.size * 0.4);
+      const fy = by - boss.size * 0.3 + Math.sin(t * 4 + i) * 10;
+      ctx.fillText('\u{1F525}', fx, fy);
+    }
+  }
+
+  // HP bar
+  const barW = boss.size * 1.2;
+  const barH = 8;
+  const barX = bx - barW / 2;
+  const barY = by - boss.size * 0.5 - 15;
+  // Background
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+  // HP fill
+  const hpPct = boss.hp / boss.maxHp;
+  const hpColor = hpPct > 0.5 ? '#44FF44' : hpPct > 0.25 ? '#FFAA00' : '#FF2222';
+  ctx.fillStyle = hpColor;
+  ctx.fillRect(barX, barY, barW * hpPct, barH);
+  // Boss name above HP
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = '#FF4444';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(boss.name, bx, barY - 8);
+  ctx.fillText(boss.name, bx, barY - 8);
+  ctx.lineWidth = 1;
+
+  ctx.restore();
+}
+
 function drawPiggy() {
   const bobOffset = Math.sin(piggyBobTimer * 3) * 2; // subtle idle bob
   const poopSquat = isPooping ? 8 : 0; // squat down when pooping
   const drawY = player.y + shakeVisualOffset + bobOffset + poopSquat;
 
   ctx.save();
+  // Invisibility effect
+  if (hasPowerUp('invisibility')) {
+    ctx.globalAlpha = 0.3 + Math.sin(Date.now() / 200) * 0.1;
+  }
+  // Speed boost trail
+  if (hasPowerUp('speedBoost')) {
+    ctx.globalAlpha = 0.2;
+    ctx.font = '30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(player.emoji, player.x - player.facing * 20, drawY);
+    ctx.fillText(player.emoji, player.x - player.facing * 40, drawY);
+    ctx.globalAlpha = hasPowerUp('invisibility') ? 0.3 : 1;
+  }
   ctx.translate(player.x, drawY);
 
   // Wobble for 2 cracks
@@ -6181,7 +6922,7 @@ function drawHUD() {
 
   // Top-center: Level with rounded background
   ctx.textAlign = 'center';
-  const levelText = 'Level ' + game.level;
+  const levelText = 'Level ' + game.level + (bossActive ? ' \u26A0\uFE0F BOSS' : ' - ' + currentBiome.name);
   ctx.font = levelFont;
   const levelTextW = ctx.measureText(levelText).width;
   // Rounded background pill
@@ -6472,8 +7213,12 @@ function drawShop() {
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 2;
-  ctx.strokeText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY + skipBtnH / 2);
-  ctx.fillText('\u25B6 Nastavi na Level ' + (game.level + 1), WIDTH / 2, skipY + skipBtnH / 2);
+  const nextBiome = getBiomeForLevel(game.level + 1);
+  const nextBossKey = getBossForLevel(game.level + 1);
+  let skipLabel = '\u25B6 Level ' + (game.level + 1) + ' - ' + nextBiome.name;
+  if (nextBossKey) skipLabel += ' \u26A0\uFE0F BOSS!';
+  ctx.strokeText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
+  ctx.fillText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
   ctx.lineWidth = 1;
   shopSkipRect = { x: skipBtnX, y: skipY, w: skipBtnW, h: skipBtnH };
 
@@ -8601,12 +9346,84 @@ function drawPlayingScene() {
     ctx.globalAlpha = 1.0;
   }
 
+  // --- Draw Boss ---
+  if (boss && boss.state !== 'dead') {
+    drawBoss();
+  }
+  // --- Draw Boss Projectiles ---
+  for (const bp of bossProjectiles) {
+    ctx.font = bp.size + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(bp.emoji, bp.x, bp.y);
+  }
+
+  // --- Draw Power-up Drops ---
+  for (const pu of powerUpDrops) {
+    const pt = POWER_UP_TYPES[pu.powerType];
+    const bob = Math.sin((pu.bobTimer || 0) * 4) * 5;
+    // Glow
+    ctx.shadowColor = pt.color;
+    ctx.shadowBlur = 15;
+    ctx.font = '28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pt.emoji, pu.x, pu.y + bob);
+    ctx.shadowBlur = 0;
+    // Rotating ring
+    ctx.strokeStyle = pt.color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.arc(pu.x, pu.y + bob, 20, Date.now() / 500, Date.now() / 500 + Math.PI * 1.2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Draw Active Power-up Icons (bottom of screen) ---
+  if (activePowerUps.length > 0) {
+    for (let i = 0; i < activePowerUps.length; i++) {
+      const ap = activePowerUps[i];
+      const pt = POWER_UP_TYPES[ap.type];
+      const px = 30 + i * 45;
+      const py = HEIGHT - 60;
+      // Timer bar
+      const pct = ap.timer / ap.maxTimer;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(px - 15, py + 12, 30, 4);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(px - 15, py + 12, 30 * pct, 4);
+      // Icon
+      ctx.font = '20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pt.emoji, px, py);
+      // Blink when about to expire
+      if (ap.timer < 2 && Math.sin(Date.now() / 100) > 0) {
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = pt.color;
+        ctx.beginPath();
+        ctx.arc(px, py, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
   // Flash overlay (red for damage, gold for moneybag)
   if (flashTimer > 0) {
     ctx.globalAlpha = flashTimer / 0.3 * 0.4;
     ctx.fillStyle = flashColor || '#ff0000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.globalAlpha = 1.0;
+  }
+
+  // Freeze overlay
+  if (hasPowerUp('freeze')) {
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = '#88DDFF';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.globalAlpha = 1;
   }
 
   ctx.restore(); // restore screen shake transform
@@ -9110,8 +9927,10 @@ function drawLevelComplete() {
   ctx.fillStyle = '#2d2d2d';
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 3;
-  ctx.strokeText('Level ' + game.level + ' Complete! \u2728', WIDTH / 2, 40);
-  ctx.fillText('Level ' + game.level + ' Complete! \u2728', WIDTH / 2, 40);
+  const biomeLabel = currentBiome.name;
+  const bossLabel = bossDefeatedThisLevel ? ' \u{1F3C6} BOSS DEFEATED!' : '';
+  ctx.strokeText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
+  ctx.fillText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
   ctx.lineWidth = 1;
 
   // Score
