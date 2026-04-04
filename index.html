@@ -612,8 +612,8 @@ let fartCooldown = 0;          // prevent spam (0.5s cooldown)
 const chokingDevils = [];      // devils that got farted on (dying animation)
 
 // --- Wet Fart (Vlažni Prdež) system ---
-let wetFartCharges = 2;
-const MAX_WET_FARTS = 5;
+let wetFartCharges = 5;
+const MAX_WET_FARTS = 8;
 let wetFartProjectiles = []; // active projectiles
 let wetFartInflateTimer = 0; // inflation animation before firing
 let wetFartPendingDir = 0;   // direction to fire after inflation
@@ -2716,8 +2716,9 @@ function startLevel() {
       deathTimer: 0,
       shakeTimer: 0
     };
-    // Boss levels get extra time
+    // Boss levels get extra time and extra wet farts
     game.levelTimer += 15;
+    wetFartCharges = MAX_WET_FARTS;
   }
 
   // Power-ups reset
@@ -3017,7 +3018,7 @@ window.addEventListener('keydown', (e) => {
       materials = { straw: 0, logs: 0, bricks: 0 };
       playerBTC = 0;
       scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
-      wetFartCharges = 2; wetFartProjectiles.length = 0; wetFartInflateTimer = 0;
+      wetFartCharges = 5; wetFartProjectiles.length = 0; wetFartInflateTimer = 0;
       startLevel();
     } else if (game.screen === 'gameOver') {
       game.score = 0;
