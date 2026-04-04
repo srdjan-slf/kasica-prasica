@@ -154,6 +154,7 @@
     <div class="touch-btn" id="btnDown" data-key="ArrowDown">&#9660;</div>
   </div>
   <div class="touch-btn" id="btnRight" data-key="ArrowRight">&#9654;</div>
+  <div class="touch-btn" id="btnHouse" data-key="k" style="width:50px;height:50px;font-size:22px;background:rgba(180,120,60,0.25);border-color:rgba(180,120,60,0.6);">&#127968;</div>
 </div>
 
 <div id="nameInputOverlay" style="display:none;">
@@ -335,56 +336,56 @@ function getLevelConfig(level) {
 
   if (level === 1) {
     duration = 35;
-    fallSpeed = 104;
-    spawnRate = 0.77;
+    fallSpeed = 120;
+    spawnRate = 0.65;
     devilCount = 2;
     bombChance = 0.08;
     billChance = 0.12;
     goldChance = 0.04;
   } else if (level === 2) {
     duration = 40;
-    fallSpeed = 124;
-    spawnRate = 0.65;
+    fallSpeed = 143;
+    spawnRate = 0.55;
     devilCount = 3;
     bombChance = 0.12;
     billChance = 0.18;
     goldChance = 0.06;
   } else if (level === 3) {
     duration = 40;
-    fallSpeed = 143;
-    spawnRate = 0.54;
+    fallSpeed = 164;
+    spawnRate = 0.46;
     devilCount = 5;
     bombChance = 0.14;
     billChance = 0.22;
     goldChance = 0.08;
   } else if (level === 4) {
     duration = 45;
-    fallSpeed = 169;
-    spawnRate = 0.46;
+    fallSpeed = 194;
+    spawnRate = 0.39;
     devilCount = 7;
     bombChance = 0.18;
     billChance = 0.22;
     goldChance = 0.09;
   } else if (level === 5) {
     duration = 45;
-    fallSpeed = 195;
-    spawnRate = 0.39;
+    fallSpeed = 224;
+    spawnRate = 0.33;
     devilCount = 9;
     bombChance = 0.21;
     billChance = 0.28;
     goldChance = 0.12;
   } else if (level === 6) {
     duration = 50;
-    fallSpeed = 215;
-    spawnRate = 0.32;
+    fallSpeed = 247;
+    spawnRate = 0.27;
     devilCount = 12;
     bombChance = 0.23;
     billChance = 0.28;
     goldChance = 0.12;
   } else if (level === 7) {
     duration = 50;
-    fallSpeed = 234;
-    spawnRate = 0.27;
+    fallSpeed = 269;
+    spawnRate = 0.23;
     devilCount = 14;
     bombChance = 0.26;
     billChance = 0.28;
@@ -392,8 +393,8 @@ function getLevelConfig(level) {
   } else {
     // Level 8+: Gets progressively brutal
     duration = 45 + level * 3;
-    fallSpeed = Math.min(360, 234 + (level - 7) * 23);
-    spawnRate = Math.max(0.15, 0.27 - (level - 7) * 0.025);
+    fallSpeed = Math.min(414, Math.round((234 + (level - 7) * 23) * 1.15));
+    spawnRate = Math.max(0.13, (0.27 - (level - 7) * 0.025) * 0.85);
     devilCount = Math.min(24, 14 + (level - 7) * 3);
     bombChance = Math.min(0.39, 0.26 + (level - 7) * 0.026);
     billChance = 0.28;
@@ -436,7 +437,8 @@ const SHOP_ITEMS = [
   { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
   { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak, +2 prde\u017Ea', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; fartCharges = Math.min(MAX_FARTS, fartCharges + 2); } },
-  { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } }
+  { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } },
+  { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 8, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
 ];
 
 function showNameInput() {
@@ -516,6 +518,7 @@ function triggerEnemyIntro(type) {
     name: info.name,
     desc: info.desc,
     timer: 3.0,
+    duration: 3.0,
     alpha: 0
   };
 }
@@ -563,11 +566,11 @@ const groundEnemies = [];
 let groundEnemySpawnTimer = 0;
 
 const GROUND_ENEMY_TYPES = {
-  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 57, ai: 'straight', fromLevel: 3, size: 64 },
-  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 42, ai: 'chase', fromLevel: 4, size: 48 },
-  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 88, ai: 'cunning', fromLevel: 5, size: 38 },
-  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 48, ai: 'relentless', fromLevel: 6, size: 42 },
-  butcher_ground: { emoji: '🔪', name: 'Kasapin', speed: 65, ai: 'chase', fromLevel: 5, size: 55 }
+  wolf: { emoji: '\u{1F43A}', name: 'Vuk', speed: 66, ai: 'straight', fromLevel: 3, size: 64 },
+  carnivore: { emoji: '\u{1F969}', name: 'Mesožder', speed: 48, ai: 'chase', fromLevel: 4, size: 48 },
+  fox: { emoji: '\u{1F98A}', name: 'Lisica', speed: 101, ai: 'cunning', fromLevel: 5, size: 38 },
+  farmer: { emoji: '\u{1F468}\u200D\u{1F33E}', name: 'Farmer', speed: 55, ai: 'relentless', fromLevel: 6, size: 42 },
+  butcher_ground: { emoji: '🔪', name: 'Kasapin', speed: 75, ai: 'chase', fromLevel: 5, size: 55 }
 };
 
 // --- Airplanes (deliver falling butchers) ---
@@ -607,6 +610,13 @@ const MAX_FARTS = 5;
 const fartClouds = [];         // active fart clouds flying upward
 let fartCooldown = 0;          // prevent spam (0.5s cooldown)
 const chokingDevils = [];      // devils that got farted on (dying animation)
+
+// --- Wet Fart (Vlažni Prdež) system ---
+let wetFartCharges = 2;
+const MAX_WET_FARTS = 5;
+let wetFartProjectiles = []; // active projectiles
+let wetFartInflateTimer = 0; // inflation animation before firing
+let wetFartPendingDir = 0;   // direction to fire after inflation
 
 // --- Poop Mechanic ---
 const poops = [];
@@ -698,13 +708,28 @@ const SPEECH_LINES = {
   ]
 };
 
+function drawNameLabel(x, y, name, timer) {
+  if (timer <= 0) return;
+  const alpha = timer > 0.5 ? 1.0 : timer / 0.5; // fade out in last 0.5s
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 3;
+  ctx.strokeText(name, x, y - 5);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText(name, x, y - 5);
+  ctx.restore();
+}
+
 function spawnSpeechBubble(x, y, type) {
   const lines = SPEECH_LINES[type];
   if (!lines) return;
   // Don't spawn too many at once
   if (speechBubbles.length >= 3) return;
   const text = lines[Math.floor(Math.random() * lines.length)];
-  speechBubbles.push({ x, y: y - 40, text, timer: 3.0, maxTimer: 3.0 });
+  speechBubbles.push({ x, y: y - 40, text, timer: 5.0, maxTimer: 5.0 });
 }
 
 function updateSpeechBubbles(dt) {
@@ -717,13 +742,13 @@ function updateSpeechBubbles(dt) {
 
 function drawSpeechBubbles() {
   for (const sb of speechBubbles) {
-    const alpha = Math.min(1, sb.timer / 0.5); // fade out in last 0.5s
+    const alpha = Math.min(1, sb.timer / 1.0); // fade out in last 1.0s
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 16px sans-serif';
     const metrics = ctx.measureText(sb.text);
-    const tw = metrics.width + 16;
-    const th = 22;
+    const tw = metrics.width + 20;
+    const th = 26;
     const bx = Math.max(tw/2, Math.min(WIDTH - tw/2, sb.x));
 
     // Bubble background
@@ -1836,6 +1861,44 @@ function playPoopSound() {
   } catch(e) {}
 }
 
+function playWetFartSound() {
+  try {
+    const actx = getAudioContext();
+    const now = actx.currentTime;
+    // Low wet rumble
+    const osc = actx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, now);
+    osc.frequency.linearRampToValueAtTime(30, now + 0.5);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.6);
+    // Wet splatter
+    const noise = actx.createOscillator();
+    noise.type = 'square';
+    noise.frequency.setValueAtTime(120, now);
+    noise.frequency.exponentialRampToValueAtTime(20, now + 0.4);
+    const noiseGain = actx.createGain();
+    noiseGain.gain.setValueAtTime(0.2, now + 0.1);
+    noiseGain.gain.linearRampToValueAtTime(0, now + 0.5);
+    // Squish sound
+    const squish = actx.createOscillator();
+    squish.type = 'sine';
+    squish.frequency.setValueAtTime(200, now);
+    squish.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+    const squishGain = actx.createGain();
+    squishGain.gain.setValueAtTime(0.15, now);
+    squishGain.gain.linearRampToValueAtTime(0, now + 0.3);
+
+    osc.connect(gain); gain.connect(actx.destination);
+    noise.connect(noiseGain); noiseGain.connect(actx.destination);
+    squish.connect(squishGain); squishGain.connect(actx.destination);
+    osc.start(now); osc.stop(now + 0.6);
+    noise.start(now + 0.1); noise.stop(now + 0.5);
+    squish.start(now); squish.stop(now + 0.3);
+  } catch(e) {}
+}
+
 // --- Background Music System ---
 let musicPlaying = false;
 let musicNodes = null;
@@ -2305,7 +2368,8 @@ function spawnDevil() {
     shakeRequired, hammerTimeout, hammerAnimTimer: 0,
     stealTimer: 0,
     zigzagSpeed, zigzagFreq, zigzagPhase,
-    zigzagTime: 0 // tracks time for zigzag calculation
+    zigzagTime: 0, // tracks time for zigzag calculation
+    nameTimer: 3.5
   });
   triggerEnemyIntro('devil_' + devilType);
 }
@@ -2493,6 +2557,9 @@ function startLevel() {
   poopCooldown = 0;
   isPooping = false;
   poopAnimTimer = 0;
+  wetFartProjectiles.length = 0;
+  wetFartInflateTimer = 0;
+  // Do NOT reset wetFartCharges - they persist between levels
   vegan = null;
   veganDeathAnim = null;
   veganRespawnTimer = 0;
@@ -2506,7 +2573,8 @@ function startLevel() {
       dir: 1, speed: 120,
       state: 'patrol',
       blockTimer: 0,
-      auraTimer: 0
+      auraTimer: 0,
+      nameTimer: 3.5
     };
     triggerEnemyIntro('vegan');
   }
@@ -2558,6 +2626,8 @@ window.addEventListener('keydown', (e) => {
       fartClouds.length = 0;
       chokingDevils.length = 0;
       gameOverDevils.length = 0;
+      wetFartProjectiles.length = 0;
+      wetFartInflateTimer = 0;
       resurrectionState = null;
       isPaused = false;
       // Flash green to show resurrection
@@ -2599,6 +2669,21 @@ window.addEventListener('keydown', (e) => {
   // Don't process gameplay keys while paused
   if (isPaused) return;
 
+  // Wet Fart - CMD/Ctrl + Left/Right
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && game.screen === 'playing') {
+    e.preventDefault();
+    if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
+      wetFartCharges--;
+      wetFartPendingDir = e.key === 'ArrowLeft' ? -1 : 1;
+      wetFartInflateTimer = 0.6; // inflate for 0.6 seconds before firing
+      // Speech bubble - push directly
+      if (speechBubbles.length < 3) {
+        speechBubbles.push({ x: player.x, y: player.y - 80, text: 'Auu, usrah se! 💦', timer: 2.0, maxTimer: 2.0 });
+      }
+    }
+    return;
+  }
+
   keys[e.key] = true;
 
   // Jump (only when grounded and no latched devil)
@@ -2622,6 +2707,22 @@ window.addEventListener('keydown', (e) => {
       shakeVisualTimer = 0.08;
       playShakeSound();
     }
+  }
+
+  // SUMMON HOUSE from collected materials with K
+  if ((e.key === 'k' || e.key === 'K') && game.screen === 'playing' && houses.length === 0) {
+    // Pick best house player can afford from materials
+    if (materials.bricks >= 10) {
+      buildHouse('brick');
+    } else if (materials.logs >= 7) {
+      buildHouse('sticks');
+    } else if (materials.straw >= 5) {
+      buildHouse('straw');
+    } else {
+      spawnScorePopup(player.x, player.y - 40, 'Nema dovoljno materijala!', '#ff4444');
+    }
+    e.preventDefault();
+    return;
   }
 
   // Fart mechanic - SPACE during gameplay (not while in house)
@@ -2683,6 +2784,7 @@ window.addEventListener('keydown', (e) => {
       materials = { straw: 0, logs: 0, bricks: 0 };
       playerBTC = 0;
       scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
+      wetFartCharges = 2; wetFartProjectiles.length = 0; wetFartInflateTimer = 0;
       startLevel();
     } else if (game.screen === 'gameOver') {
       game.score = 0;
@@ -2795,6 +2897,14 @@ function simulateKeyDown(keyName) {
       shakeVisualTimer = 0.08;
       playShakeSound();
     }
+  }
+
+  // Handle house summon on K
+  if (keyName === 'k' && game.screen === 'playing' && houses.length === 0) {
+    if (materials.bricks >= 10) buildHouse('brick');
+    else if (materials.logs >= 7) buildHouse('sticks');
+    else if (materials.straw >= 5) buildHouse('straw');
+    else spawnScorePopup(player.x, player.y - 40, 'Nema dovoljno materijala!', '#ff4444');
   }
 
   // Handle fart on space
@@ -3630,7 +3740,8 @@ function update(dt) {
         stealTimer: 0,
         zigzagSpeed, zigzagFreq, zigzagPhase,
         zigzagTime: 0,
-        knifeTimer: 0
+        knifeTimer: 0,
+        nameTimer: 3.5
       });
     }
 
@@ -3715,6 +3826,91 @@ function update(dt) {
           break; // one devil per cloud
         }
       }
+    }
+  }
+
+  // Wet Fart inflation timer
+  if (wetFartInflateTimer > 0) {
+    wetFartInflateTimer -= dt;
+    if (wetFartInflateTimer <= 0) {
+      // FIRE! Create the wet fart projectile
+      const dir = wetFartPendingDir;
+      wetFartProjectiles.push({
+        x: player.x + dir * 30,
+        y: player.y,
+        dir: dir,
+        width: 60,
+        height: 40,
+        speed: 500,
+        life: 3.0,
+        wobble: 0,
+        trail: []
+      });
+      playWetFartSound();
+      triggerScreenShake(6, 0.3);
+      spawnParticles(player.x, player.y, '\u{1F4A6}', 5, 80);
+      spawnParticles(player.x, player.y, '\u{1F4A8}', 3, 60);
+    }
+  }
+
+  // Update wet fart projectiles
+  for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
+    const wf = wetFartProjectiles[i];
+    wf.x += wf.speed * wf.dir * dt;
+    wf.life -= dt;
+    wf.wobble += dt * 15;
+
+    // Add trail particles
+    if (Math.random() < 0.3) {
+      wf.trail.push({ x: wf.x, y: wf.y + Math.sin(wf.wobble) * 5, alpha: 0.6, size: 15 + Math.random() * 10 });
+    }
+    // Update trail
+    for (let t = wf.trail.length - 1; t >= 0; t--) {
+      wf.trail[t].alpha -= dt * 2;
+      wf.trail[t].size *= 1.01;
+      if (wf.trail[t].alpha <= 0) wf.trail.splice(t, 1);
+    }
+
+    // Kill ground enemies in path
+    for (let e = groundEnemies.length - 1; e >= 0; e--) {
+      const enemy = groundEnemies[e];
+      if (Math.abs(wf.x - enemy.x) < (wf.width + enemy.width) / 2 && Math.abs(wf.y - enemy.y) < 40) {
+        chokingDevils.push({
+          emoji: enemy.emoji, x: enemy.x, y: enemy.y,
+          width: enemy.width, timer: 2.0, coughTimer: 0,
+          opacity: 1.0, greenTint: 1.0
+        });
+        groundEnemies.splice(e, 1);
+        playChokingSound();
+        spawnParticles(enemy.x, enemy.y, '\u{1F922}', 3, 80);
+        spawnParticles(enemy.x, enemy.y, '\u{1F4A6}', 2, 60);
+        spawnScorePopup(enemy.x, enemy.y, '\u{1F4A6}\u{1F480} POKOŠEN!', '#886600');
+        playerBTC += 5;
+        spawnScorePopup(enemy.x, enemy.y - 25, '+5 \u20BF', '#F7931A');
+      }
+    }
+
+    // Also kill falling devils near ground level
+    for (let o = objects.length - 1; o >= 0; o--) {
+      const obj = objects[o];
+      if ((obj.type === 'devil' || obj.type === 'butcher') && obj.y > HEIGHT - 100) {
+        if (Math.abs(wf.x - obj.x) < (wf.width + obj.width) / 2) {
+          spawnParticles(obj.x, obj.y, '\u{1F4A6}', 3, 80);
+          spawnScorePopup(obj.x, obj.y, '\u{1F4A6}\u{1F480}', '#886600');
+          playerBTC += 3;
+          objects.splice(o, 1);
+        }
+      }
+    }
+
+    // Kill vegan too
+    if (vegan && Math.abs(wf.x - vegan.x) < 40 && Math.abs(wf.y - vegan.y) < 40) {
+      killVegan('wetfart');
+    }
+
+    // Remove if off screen or expired
+    if (wf.life <= 0 || wf.x < -100 || wf.x > WIDTH + 100) {
+      wetFartProjectiles.splice(i, 1);
     }
   }
 
@@ -3881,6 +4077,11 @@ function update(dt) {
       obj.hasParachute = false;
       obj.speed = obj.normalSpeed;
       spawnParticles(obj.x, obj.y, '🪂', 1, 50);
+    }
+
+    // Name timer for devils/butchers
+    if ((obj.type === 'devil' || obj.type === 'butcher') && obj.nameTimer > 0) {
+      obj.nameTimer = Math.max(0, obj.nameTimer - dt);
     }
 
     // Zigzag movement for devils
@@ -4185,7 +4386,8 @@ function update(dt) {
           dir: fromLeft ? 1 : -1,
           ai: type.ai,
           pauseTimer: 0,
-          animTimer: 0
+          animTimer: 0,
+          nameTimer: 3.5
         });
         triggerEnemyIntro(key);
       }
@@ -4195,6 +4397,7 @@ function update(dt) {
   for (let i = groundEnemies.length - 1; i >= 0; i--) {
     const e = groundEnemies[i];
     e.animTimer += dt;
+    e.nameTimer = Math.max(0, (e.nameTimer || 0) - dt);
 
     // Wolf blowing at house mechanic
     if (e.blowingAtHouse) {
@@ -4331,6 +4534,7 @@ function update(dt) {
   // --- Vegan Ally Update (SUPER ACTIVE DEFENDER) ---
   if (vegan && vegan.state !== 'dead') {
     vegan.auraTimer += dt;
+    vegan.nameTimer = Math.max(0, (vegan.nameTimer || 0) - dt);
 
     // Find nearest ANY ground threat (not just carnivore/farmer - ALL enemies!)
     let nearestThreat = null;
@@ -4419,7 +4623,8 @@ function update(dt) {
         dir: fromLeft ? 1 : -1, speed: 120,
         state: 'patrol',
         blockTimer: 0,
-        auraTimer: 0
+        auraTimer: 0,
+        nameTimer: 3.5
       };
       spawnParticles(vegan.x, vegan.y, '🌿', 5, 100);
       spawnScorePopup(vegan.x, vegan.y - 30, 'Vegan se vratio! 🌱', '#44cc44');
@@ -6079,6 +6284,18 @@ function drawHUD() {
     }
   }
 
+  // Wet fart charges display
+  const wfX = 180;
+  ctx.font = mHud ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const wfText = '\u{1F4A6}\u{1F4A8} x' + wetFartCharges;
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 3;
+  ctx.strokeText(wfText, wfX, fartY);
+  ctx.fillStyle = wetFartCharges > 0 ? '#886600' : '#666';
+  ctx.fillText(wfText, wfX, fartY);
+
   // Building materials display
   const matY = mHud ? 110 : 95;
   ctx.font = mHud ? '18px sans-serif' : '14px sans-serif';
@@ -6350,6 +6567,7 @@ function drawHelpScreen() {
     ['SHIFT', 'Sranje (\uD83D\uDCA9 ubija po zemlji)'],
     ['ESC', 'Ovo uputstvo'],
     ['P', 'Pauza'],
+    ['CMD/Ctrl+\u2190\u2192', 'Vla\u017Eni prde\u017E (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
     ['CMD+P', '\uD83E\uDD2B Tajna \u0161ifra...'],
   ];
   for (const [key, desc] of controls) {
@@ -7761,6 +7979,84 @@ function drawPlayingScene() {
     ctx.restore();
   }
 
+  // Wet fart projectiles
+  for (const wf of wetFartProjectiles) {
+    ctx.save();
+    ctx.translate(wf.x, wf.y);
+
+    // Trail
+    for (const t of wf.trail) {
+      ctx.globalAlpha = t.alpha * 0.4;
+      ctx.fillStyle = '#886622';
+      ctx.beginPath();
+      ctx.arc(t.x - wf.x, t.y - wf.y, t.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = Math.min(1, wf.life);
+
+    // Main projectile - brown/green cloud
+    const wobbleY = Math.sin(wf.wobble) * 6;
+
+    // Outer glow
+    ctx.fillStyle = 'rgba(100, 80, 20, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, wobbleY, 40, 25, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main blob
+    const wfGrad = ctx.createRadialGradient(0, wobbleY, 5, 0, wobbleY, 30);
+    wfGrad.addColorStop(0, 'rgba(139, 119, 42, 0.9)');
+    wfGrad.addColorStop(0.5, 'rgba(100, 80, 20, 0.7)');
+    wfGrad.addColorStop(1, 'rgba(80, 60, 10, 0)');
+    ctx.fillStyle = wfGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, wobbleY, 35, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Droplets
+    ctx.fillStyle = '#665500';
+    for (let d = 0; d < 4; d++) {
+      const dx = Math.cos(wf.wobble + d * 1.5) * 20 * wf.dir;
+      const dy = Math.sin(wf.wobble * 2 + d) * 12;
+      ctx.beginPath();
+      ctx.arc(dx, wobbleY + dy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Emoji in center
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F4A9}', wf.dir * 5, wobbleY);
+
+    // Stink lines ahead of projectile
+    ctx.strokeStyle = 'rgba(100, 150, 50, 0.5)';
+    ctx.lineWidth = 2;
+    for (let s = 0; s < 3; s++) {
+      const sx = wf.dir * (25 + s * 12);
+      ctx.beginPath();
+      ctx.moveTo(sx, wobbleY - 10 + Math.sin(wf.wobble + s) * 5);
+      ctx.quadraticCurveTo(sx + wf.dir * 8, wobbleY + Math.cos(wf.wobble + s) * 8, sx + wf.dir * 15, wobbleY + 5);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // Piggy inflation animation (before wet fart fires)
+  if (wetFartInflateTimer > 0) {
+    const inflateScale = 1.0 + (0.6 - wetFartInflateTimer) * 0.8;
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.scale(Math.min(1.5, inflateScale), Math.min(1.5, inflateScale));
+    ctx.fillStyle = 'rgba(255, 0, 0, ' + (0.3 * (1 - wetFartInflateTimer / 0.6)) + ')';
+    ctx.beginPath();
+    ctx.arc(0, 0, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Draw airplanes
   for (const plane of airplanes) {
     ctx.save();
@@ -7771,9 +8067,27 @@ function drawPlayingScene() {
     ctx.beginPath();
     ctx.ellipse(0, 0, 30, 10, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Wings
-    ctx.fillStyle = '#666';
-    ctx.fillRect(-10, -3, 20, 6);
+    // Wings - proper airplane wings
+    ctx.fillStyle = '#777';
+    // Main wing
+    ctx.beginPath();
+    ctx.moveTo(-5, 0);
+    ctx.lineTo(-15, -22);  // left wing tip
+    ctx.lineTo(5, -22);
+    ctx.lineTo(15, 0);
+    ctx.lineTo(15, 4);
+    ctx.lineTo(5, 18);    // right wing (below)
+    ctx.lineTo(-15, 18);
+    ctx.lineTo(-5, 0);
+    ctx.closePath();
+    ctx.fill();
+    // Wing struts
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -20);
+    ctx.lineTo(0, 16);
+    ctx.stroke();
     // Tail
     ctx.beginPath();
     ctx.moveTo(-28, 0);
@@ -7879,6 +8193,10 @@ function drawPlayingScene() {
     } else {
       ctx.font = Math.round(32 * ms) + 'px sans-serif';
       ctx.fillText(obj.emoji || '', obj.x, obj.y);
+    }
+    // Floating name label for falling devils/butchers
+    if ((obj.type === 'devil' || obj.type === 'butcher') && obj.nameTimer > 0) {
+      drawNameLabel(obj.x, obj.y - obj.height/2 - 10, obj.type === 'devil' ? 'Đavo' : 'Kasapin', obj.nameTimer);
     }
   }
 
@@ -7997,6 +8315,9 @@ function drawPlayingScene() {
       ctx.fillText(e.emoji, 0, bob);
       ctx.restore();
     }
+    // Floating name label above ground enemy
+    const enemyNames = { wolf: 'Vuk', fox: 'Lisica', carnivore: 'Mesožder', farmer: 'Farmer', butcher_ground: 'Kasapin' };
+    if (e.nameTimer > 0) drawNameLabel(e.x, e.y - e.height/2 - 10, enemyNames[e.type] || e.type, e.nameTimer);
   }
 
   // Draw vegan ally
@@ -8017,6 +8338,7 @@ function drawPlayingScene() {
     ctx.restore();
     // Draw the vegan sprite
     drawVeganSprite(vegan.x, vegan.y, vegan.dir, vegan.auraTimer, vegan.state);
+    if (vegan.nameTimer > 0) drawNameLabel(vegan.x, vegan.y - 35, 'Vegan 🌿', vegan.nameTimer);
   }
 
   // Player (piggy with visual states)
@@ -8297,42 +8619,27 @@ function drawPlayingScene() {
   // HUD drawn outside shake transform so it stays stable
   drawHUD();
 
-  // Enemy intro banner
+  // Enemy intro - just show name as floating text (no black bar)
   if (enemyIntroActive) {
     const ei = enemyIntroActive;
-    const fadeOut = ei.timer < 0.5 ? ei.timer / 0.5 : 1;
-    const alpha = ei.alpha * fadeOut;
-
+    const alpha = ei.timer > 0.5 ? Math.min(1, (ei.duration - ei.timer + 0.5) / 0.5) : ei.timer / 0.5; // fade in 0.5s, fade out 0.5s
     ctx.save();
     ctx.globalAlpha = alpha;
-
-    // Dark banner across middle of screen
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-    ctx.fillRect(0, HEIGHT / 2 - 50, WIDTH, 100);
-
-    // Border lines
-    ctx.strokeStyle = '#FFD700';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(10, HEIGHT / 2 - 48, WIDTH - 20, 96);
-
-    // Icon
-    ctx.font = '40px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(ei.icon, WIDTH / 2, HEIGHT / 2 - 10);
-
-    // Name
-    ctx.font = 'bold 24px sans-serif';
+    // Icon + name in large text, no background
+    ctx.font = 'bold 28px sans-serif';
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.lineWidth = 4;
+    ctx.strokeText(ei.icon + ' ' + ei.name, WIDTH / 2, 80);
     ctx.fillStyle = '#FFD700';
-    ctx.strokeStyle = '#000';
+    ctx.fillText(ei.icon + ' ' + ei.name, WIDTH / 2, 80);
+    // Description smaller
+    ctx.font = '18px sans-serif';
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
     ctx.lineWidth = 3;
-    ctx.strokeText(ei.name, WIDTH / 2, HEIGHT / 2 + 20);
-    ctx.fillText(ei.name, WIDTH / 2, HEIGHT / 2 + 20);
-
-    // Description
-    ctx.font = '16px sans-serif';
+    ctx.strokeText(ei.desc, WIDTH / 2, 108);
     ctx.fillStyle = '#fff';
-    ctx.fillText(ei.desc, WIDTH / 2, HEIGHT / 2 + 42);
-
+    ctx.fillText(ei.desc, WIDTH / 2, 108);
     ctx.restore();
   }
 }
