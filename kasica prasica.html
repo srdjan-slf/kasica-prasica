@@ -111,7 +111,7 @@
     min-height: 44px;
   }
   #fullscreenBtn:hover, #fullscreenBtn:active { background: rgba(0,0,0,0.7); }
-  #pauseBtn {
+  #pauseBtn, #helpBtn {
     display: none;
     position: fixed;
     top: 8px;
@@ -126,8 +126,36 @@
     cursor: pointer;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 44px;
+    min-height: 44px;
   }
-  #pauseBtn:hover { background: rgba(0,0,0,0.6); }
+  #helpBtn { top: 60px; }
+  #pauseBtn:hover, #helpBtn:hover { background: rgba(0,0,0,0.6); }
+  #rotateOverlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 500;
+    background: rgba(10, 10, 25, 0.96);
+    color: #fff;
+    text-align: center;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: bold;
+  }
+  #rotateOverlay .phone {
+    font-size: 72px;
+    margin-bottom: 20px;
+    animation: rotatePhoneHint 1.6s ease-in-out infinite;
+  }
+  @keyframes rotatePhoneHint {
+    0%, 20% { transform: rotate(0deg); }
+    60%, 100% { transform: rotate(90deg); }
+  }
   #nameInputOverlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -142,7 +170,12 @@
 <body>
 <canvas id="gameCanvas"></canvas>
 <button id="fullscreenBtn">&#x26F6;</button>
-<button id="pauseBtn" onclick="if(game.screen==='playing'){isPaused=!isPaused;}">&#x23F8;</button>
+<button id="pauseBtn" onclick="togglePause(); this.blur();">&#x23F8;</button>
+<button id="helpBtn" onclick="toggleHelpOverlay(); this.blur();">&#x2753;</button>
+<div id="rotateOverlay">
+  <div class="phone">&#x1F4F1;</div>
+  <div>Okreni telefon vodoravno!</div>
+</div>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
@@ -203,9 +236,28 @@ function resizeCanvas() {
     canvas.style.height = (HEIGHT * scale) + 'px';
   }
 }
+// Portrait blocker: the game is landscape-only on phones. When a touch device
+// is held in portrait, show a full-screen "rotate your phone" overlay; the
+// game loop also auto-pauses gameplay while this is up.
+let portraitBlocked = false;
+function updateOrientationOverlay() {
+  const isTouchDev = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  portraitBlocked = isTouchDev && window.innerHeight > window.innerWidth;
+  const ov = document.getElementById('rotateOverlay');
+  if (ov) ov.style.display = portraitBlocked ? 'flex' : 'none';
+}
+
 resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 100); });
+updateOrientationOverlay();
+window.addEventListener('resize', () => { resizeCanvas(); updateOrientationOverlay(); });
+window.addEventListener('orientationchange', () => { setTimeout(() => { resizeCanvas(); updateOrientationOverlay(); }, 100); });
+
+// Lock to landscape where the API is supported (Android Chrome in fullscreen)
+function lockLandscape() {
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
 
 function toggleFullscreen() {
   const elem = document.documentElement;
@@ -216,13 +268,14 @@ function toggleFullscreen() {
   if (!isFS) {
     // Try standard Fullscreen API (works on Android Chrome, desktop)
     if (elem.requestFullscreen) {
-      elem.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+      elem.requestFullscreen({ navigationUI: 'hide' }).then(lockLandscape).catch(() => {
         // Fallback: try webkit version
-        if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        if (elem.webkitRequestFullscreen) { elem.webkitRequestFullscreen(); lockLandscape(); }
         else fakeFullscreen();
       });
     } else if (elem.webkitRequestFullscreen) {
       elem.webkitRequestFullscreen();
+      lockLandscape();
     } else {
       // iOS Safari: no Fullscreen API - use fake fullscreen
       fakeFullscreen();
@@ -258,9 +311,7 @@ function fakeFullscreen() {
   }, 100);
 
   // Try to lock screen orientation to landscape if available
-  if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock('landscape').catch(() => {});
-  }
+  lockLandscape();
 }
 
 // Detect iOS Safari (no Fullscreen API support)
@@ -320,13 +371,23 @@ fsBtn.addEventListener('touchend', function(e) {
   e.stopPropagation();
   if (isIOS && !isStandalone && !document.fullscreenElement) {
     fakeFullscreen();
-    showIOSHint();
+    // Show the "Add to Home Screen" instructions only once - repeat visitors
+    // just get the fake fullscreen toggle without the overlay
+    let hintShown = false;
+    try { hintShown = !!localStorage.getItem('kasicaIosHintShown'); } catch (_) {}
+    if (!hintShown) {
+      try { localStorage.setItem('kasicaIosHintShown', '1'); } catch (_) {}
+      showIOSHint();
+    }
   } else {
     toggleFullscreen();
   }
+  this.blur();
 }, { passive: false });
 fsBtn.addEventListener('click', function(e) {
   if (!('ontouchstart' in window)) toggleFullscreen();
+  // Drop focus so a later Enter/Space press can't re-toggle fullscreen mid-game
+  this.blur();
 });
 
 // --- Level Configuration (with difficulty tuning) ---
@@ -391,8 +452,10 @@ function getLevelConfig(level) {
     billChance = 0.28;
     goldChance = 0.14;
   } else {
-    // Level 8+: Gets progressively brutal
-    duration = 45 + level * 3;
+    // Level 8+: Gets progressively brutal.
+    // Keep late levels SHORT and intense (was 45+level*3 = a 69s slog at L8):
+    // denser danger already raises difficulty, longer duration just adds fatigue.
+    duration = Math.min(60, 40 + level * 2);
     fallSpeed = Math.min(414, Math.round((234 + (level - 7) * 23) * 1.15));
     spawnRate = Math.max(0.13, (0.27 - (level - 7) * 0.025) * 0.85);
     devilCount = Math.min(24, 14 + (level - 7) * 3);
@@ -423,7 +486,10 @@ const game = {
 // --- Player Name & Bitcoin Currency ---
 let playerName = localStorage.getItem('kasicaPlayerName') || '';
 let playerBTC = 0;
-let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0');
+let btcBanked = 0; // how much of playerBTC was already added to totalBTC this run
+let currentRunId = 0; // unique id per run - lets the leaderboard update one row per run
+let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0', 10);
+if (!Number.isFinite(totalBTC)) totalBTC = 0;
 
 // --- Shop Power-ups ---
 let scoreMultiplier = 1;
@@ -431,14 +497,15 @@ let hasShield = false;
 let turboFart = false;
 let megaPoop = false;
 let shopSkipRect = null;
+let victoryFlawless = false; // did the final level earn the flawless bonus?
 
 const SHOP_ITEMS = [
   { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
-  { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
+  { id: 'doubleScore', name: '2x Poeni', desc: 'Dupli poeni (1 nivo)', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
-  { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak, +2 prde\u017Ea', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; fartCharges = Math.min(MAX_FARTS, fartCharges + 2); } },
+  { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak na slede\u0107em nivou', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; } },
   { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } },
-  { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 8, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
+  { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 6, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
 ];
 
 function showNameInput() {
@@ -451,21 +518,48 @@ function hideNameInput() {
   document.getElementById('nameInputOverlay').style.display = 'none';
 }
 
+// Cached leaderboard - parsed once, refreshed after saves (avoids JSON.parse every frame)
+let leaderboardCache = null;
+function loadLeaderboard() {
+  if (leaderboardCache) return leaderboardCache;
+  try {
+    const parsed = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+    leaderboardCache = Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    // Corrupted storage - discard it instead of crashing every frame
+    try { localStorage.removeItem('kasicaLeaderboard'); } catch (e2) {}
+    leaderboardCache = [];
+  }
+  return leaderboardCache;
+}
+
 function saveToLeaderboard() {
-  const entry = {
-    name: playerName,
-    score: game.score,
-    level: game.level,
-    btc: playerBTC,
-    date: new Date().toISOString().split('T')[0]
-  };
-  let leaderboard = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
-  leaderboard.push(entry);
-  leaderboard.sort(function(a, b) { return b.score - a.score; });
-  leaderboard = leaderboard.slice(0, 20);
-  localStorage.setItem('kasicaLeaderboard', JSON.stringify(leaderboard));
-  totalBTC += playerBTC;
-  localStorage.setItem('kasicaTotalBTC', totalBTC.toString());
+  try {
+    const entry = {
+      name: playerName,
+      score: game.score,
+      level: game.level,
+      btc: playerBTC,
+      runId: currentRunId,
+      date: new Date().toISOString().split('T')[0]
+    };
+    // One row per run: death + resurrection + second death must UPDATE the
+    // existing row, not add a duplicate entry for the same run.
+    let leaderboard = loadLeaderboard().slice().filter(function(en) {
+      return !(en.runId && en.runId === currentRunId);
+    });
+    leaderboard.push(entry);
+    leaderboard.sort(function(a, b) { return b.score - a.score; });
+    leaderboard = leaderboard.slice(0, 20);
+    leaderboardCache = leaderboard;
+    localStorage.setItem('kasicaLeaderboard', JSON.stringify(leaderboard));
+    // Only bank BTC that hasn't been banked yet this run (death + resurrect + victory = no double counting)
+    totalBTC += Math.max(0, playerBTC - btcBanked);
+    btcBanked = Math.max(btcBanked, playerBTC);
+    localStorage.setItem('kasicaTotalBTC', totalBTC.toString());
+  } catch (e) {
+    // Never let storage problems break death/victory sequences
+  }
 }
 
 // --- Intro Cutscene State ---
@@ -498,14 +592,20 @@ let enemyIntroActive = null; // { icon, name, desc, timer, alpha }
 const ENEMY_INTROS = {
   devil_fast: { icon: '\u{1F608}', name: 'BRZI \u0110AVO', desc: 'Leti brzo i ka\u010Di se za kasicu! Tresenje: \u2191\u2193' },
   devil_heavy: { icon: '\u{1F47F}', name: 'TE\u0160KI \u0110AVO', desc: 'Spor ali jak! Treba vi\u0161e tresenja!' },
-  devil_thief: { icon: '\u{1F608}', name: '\u0110AVO LOPOV', desc: 'Krade nov\u010Di\u0107e kad se zaka\u010Di!' },
-  butcher: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'No\u017Eevima skida srca! Otresi ga brzo!' },
+  devil_thief: { icon: '\u{1F479}', name: '\u0110AVO LOPOV', desc: 'Krade nov\u010Di\u0107e kad se zaka\u010Di!' },
+  butcher: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'Jak i uporan! Otresi ga pre nego \u0161to zamahne no\u017Eem!' },
+  butcher_ground: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'Juri te s no\u017Eem po zemlji! Presko\u010Di ga!' },
   wolf: { icon: '\u{1F43A}', name: 'VUK', desc: 'Tr\u010Di po zemlji! Presko\u010Di ga ili se sakrij u ku\u0107u!' },
   fox: { icon: '\u{1F98A}', name: 'LISICA', desc: 'Lukava i brza! Presko\u010Di je!' },
-  carnivore: { icon: '\u{1F356}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
+  carnivore: { icon: '\u{1F969}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
   farmer: { icon: '\u{1F468}\u200D\u{1F33E}', name: 'FARMER', desc: 'Hvata svinje za klanicu!' },
-  vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Brani te od meso\u017Edera! \u010Cuvaj ga!' },
-  bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' }
+  vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Tvoj prijatelj! Brani\u0107e te kad zveri nai\u0111u \u2014 \u010Duvaj ga!' },
+  bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' },
+  boss_velikiVuk: { icon: '\u{1F43A}', name: 'BOSS: VELIKI VUK', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}!' },
+  boss_megaKasapin: { icon: '\u{1F52A}', name: 'BOSS: MEGA KASAPIN', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Beži od noževa!' },
+  boss_kraljDjavola: { icon: '\u{1F47F}', name: 'BOSS: KRALJ ĐAVOLA', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Izbegavaj vatru!' },
+  boss_zloFarmer: { icon: '\u{1F468}‍\u{1F33E}', name: 'BOSS: ZLO FARMER', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Pazi na vile i zamke!' },
+  boss_kraljKlanice: { icon: '\u{1F9CC}', name: 'FINALNI BOSS: KRALJ KLANICE', desc: 'Zna SVE napade! Gađaj ga prdežima \u{1F4A8}\u{1F4A6}, a kad se obruši - kakica \u{1F4A9} ga truje!' }
 };
 
 function triggerEnemyIntro(type) {
@@ -530,11 +630,19 @@ let victoryAngels = [];
 let victoryVegans = [];
 let victoryIntruderTimer = 0;
 let victoryMusicTimeout = null;
+let victoryMusicNodes = [];
+// The victory melody is exactly 4.05s (7 notes x 0.45 + one 0.9); looping on
+// this constant makes it seamless instead of leaving ~1s of dead air.
+const VICTORY_MELODY_DUR = 4.05;
 
 // --- Intro Music ---
 let introMusicNodes = [];
+let introMusicOldNodes = []; // previous loop pass, ends on its own at the bar line
 let introMusicTimeout = null;
 let currentIntroMusic = -1;
+let playingIntroTheme = -1;   // which THEME is sounding (scenes 3 & 4 share one)
+let introThemeStartAt = 0;    // audioCtx time the current theme pass started
+let introMusicNextStart = 0;  // >0 = seamless loop restart at exactly this time
 
 // --- Player ---
 const player = {
@@ -578,7 +686,6 @@ let airplanes = [];
 
 // --- House Shelter System (Three Little Pigs) ---
 const houses = [];
-let houseSpawnTimer = 8; // first house spawns after 8 seconds
 
 const HOUSE_TYPES = {
   straw:  { name: 'Kuća od slame', hp: 2,  wallColor: '#DAA520', roofColor: '#F0E68C', wolfBlows: 1, emoji: '🌾' },
@@ -600,6 +707,9 @@ let shakeVisualOffset = 0;
 let shakeVisualTimer = 0;
 const ejectedCoins = [];
 let squealTimer = 0;
+let squealAlt = false;  // alternate full squeal / quieter whimper while latched
+let coinCombo = 0;      // consecutive catches raise the coin pitch a semitone
+let muteIconRect = null; // clickable HUD rect for the 🔊/🔇 toggle
 let successFlashTimer = 0;
 let shakeHintTimer = 0;
 let devilTypeIndicator = null; // {text, color, timer}
@@ -615,6 +725,9 @@ const chokingDevils = [];      // devils that got farted on (dying animation)
 let wetFartCharges = 5;
 const MAX_WET_FARTS = 8;
 let wetFartProjectiles = []; // active projectiles
+// Boss-fight lob: flight time and gravity of the aimed ballistic arc
+const WET_FART_ARC_TIME = 0.85;
+const WET_FART_ARC_G = 900;
 let wetFartInflateTimer = 0; // inflation animation before firing
 let wetFartPendingDir = 0;   // direction to fire after inflation
 
@@ -946,7 +1059,9 @@ const BIOME_ORDER = ['livada', 'suma', 'grad', 'sneg', 'pakao', 'oblaci'];
 
 function getBiomeForLevel(level) {
   if (level <= 2) return BIOMES.livada;
-  const idx = Math.min(BIOME_ORDER.length - 1, Math.floor((level - 1) / 2));
+  // Level 10 (the finale) plays in the clouds - bright happy ending after Pakao (level 9)
+  if (level >= 10) return BIOMES.oblaci;
+  const idx = Math.min(BIOME_ORDER.length - 2, Math.floor((level - 1) / 2));
   return BIOMES[BIOME_ORDER[idx]];
 }
 
@@ -966,6 +1081,151 @@ function initAmbientParticles() {
       opacity: 0.3 + Math.random() * 0.5
     });
   }
+}
+
+// --- Biome backdrop silhouettes ---
+// Each biome gets one static layer of distant scenery (hills / pines /
+// skyline / mountains / volcano / cloud towers). Rendered ONCE per biome to
+// an offscreen canvas and blitted each frame - one drawImage per frame, so
+// the visual depth is basically free.
+let biomeBackdropCanvas = null;
+let biomeBackdropFor = null;
+
+function renderBiomeBackdrop() {
+  if (!biomeBackdropCanvas) {
+    biomeBackdropCanvas = document.createElement('canvas');
+    biomeBackdropCanvas.width = WIDTH;
+    biomeBackdropCanvas.height = HEIGHT;
+  }
+  const bc = biomeBackdropCanvas.getContext('2d');
+  bc.clearRect(0, 0, WIDTH, HEIGHT);
+  const base = HEIGHT - 40; // top edge of the ground strip
+
+  // Smooth double-sine hill outline from x=0..WIDTH down to the ground
+  function hillLayer(color, amp, top, phase) {
+    bc.fillStyle = color;
+    bc.beginPath();
+    bc.moveTo(0, base);
+    for (let x = 0; x <= WIDTH; x += 16) {
+      bc.lineTo(x, top + Math.sin(x / 140 + phase) * amp + Math.sin(x / 57 + phase * 2) * amp * 0.3);
+    }
+    bc.lineTo(WIDTH, base);
+    bc.closePath();
+    bc.fill();
+  }
+
+  if (currentBiome === BIOMES.livada) {
+    hillLayer('rgba(70,150,80,0.40)', 26, base - 130, 1.2);
+    // Round trees dotted along the far hill
+    bc.fillStyle = 'rgba(40,110,55,0.45)';
+    for (let i = 0; i < 7; i++) {
+      const tx = 90 + i * 170;
+      const ty = base - 120 + Math.sin(tx / 140 + 1.2) * 22;
+      bc.fillRect(tx - 3, ty - 18, 6, 20);
+      bc.beginPath();
+      bc.arc(tx, ty - 28, 16, 0, Math.PI * 2);
+      bc.fill();
+    }
+    hillLayer('rgba(55,125,65,0.55)', 20, base - 60, 4.0);
+  } else if (currentBiome === BIOMES.suma) {
+    // Two rows of pine silhouettes, back row taller and lighter
+    function pineRow(color, h, step, off) {
+      bc.fillStyle = color;
+      for (let x = -step; x < WIDTH + step; x += step) {
+        const ph = h + Math.sin((x + off) / 83) * h * 0.25;
+        bc.beginPath();
+        bc.moveTo(x, base);
+        bc.lineTo(x + step * 0.5, base - ph);
+        bc.lineTo(x + step, base);
+        bc.closePath();
+        bc.fill();
+      }
+    }
+    pineRow('rgba(30,90,60,0.40)', 160, 96, 30);
+    pineRow('rgba(12,50,30,0.60)', 100, 62, 260);
+  } else if (currentBiome === BIOMES.grad) {
+    // Distant skyline with a scattering of lit windows
+    let bx = 0, bi = 0;
+    while (bx < WIDTH) {
+      const bw = 60 + ((bi * 37) % 70);
+      const bh = 90 + ((bi * 53) % 140);
+      bc.fillStyle = 'rgba(18,18,32,0.65)';
+      bc.fillRect(bx, base - bh, bw, bh);
+      bc.fillStyle = 'rgba(255,220,120,0.40)';
+      for (let wy = base - bh + 10; wy < base - 14; wy += 18) {
+        for (let wx = bx + 8; wx < bx + bw - 10; wx += 16) {
+          if (((wx * 7 + wy * 13) % 5) < 2) bc.fillRect(wx, wy, 6, 8);
+        }
+      }
+      bx += bw + 12;
+      bi++;
+    }
+  } else if (currentBiome === BIOMES.sneg) {
+    // Jagged mountain range with snow caps on the tall peaks
+    const pts = [[0, base - 120], [140, base - 260], [300, base - 150], [460, base - 300], [640, base - 170], [820, base - 280], [1000, base - 160], [1200, base - 240]];
+    bc.fillStyle = 'rgba(75,90,125,0.55)';
+    bc.beginPath();
+    bc.moveTo(0, base);
+    for (const p of pts) bc.lineTo(p[0], p[1]);
+    bc.lineTo(WIDTH, base);
+    bc.closePath();
+    bc.fill();
+    bc.fillStyle = 'rgba(240,246,255,0.75)';
+    for (const p of pts) {
+      if (p[1] < base - 200) {
+        bc.beginPath();
+        bc.moveTo(p[0], p[1]);
+        bc.lineTo(p[0] - 34, p[1] + 46);
+        bc.lineTo(p[0] - 12, p[1] + 36);
+        bc.lineTo(p[0], p[1] + 52);
+        bc.lineTo(p[0] + 12, p[1] + 36);
+        bc.lineTo(p[0] + 34, p[1] + 46);
+        bc.closePath();
+        bc.fill();
+      }
+    }
+  } else if (currentBiome === BIOMES.pakao) {
+    // Volcano with a glowing mouth
+    bc.fillStyle = 'rgba(15,0,0,0.70)';
+    bc.beginPath();
+    bc.moveTo(700, base);
+    bc.lineTo(840, base - 220);
+    bc.lineTo(900, base - 220);
+    bc.lineTo(1040, base);
+    bc.closePath();
+    bc.fill();
+    bc.fillStyle = 'rgba(255,90,0,0.55)';
+    bc.beginPath();
+    bc.ellipse(870, base - 220, 36, 10, 0, 0, Math.PI * 2);
+    bc.fill();
+    // Jagged rock spikes along the horizon
+    bc.fillStyle = 'rgba(25,2,0,0.75)';
+    for (let i = 0; i < 14; i++) {
+      const sx = i * 90 + ((i * 31) % 40);
+      const sh = 60 + ((i * 47) % 110);
+      bc.beginPath();
+      bc.moveTo(sx, base);
+      bc.lineTo(sx + 25, base - sh);
+      bc.lineTo(sx + 55, base);
+      bc.closePath();
+      bc.fill();
+    }
+  } else if (currentBiome === BIOMES.oblaci) {
+    // Distant towers of stacked cumulus
+    bc.fillStyle = 'rgba(255,255,255,0.50)';
+    for (let i = 0; i < 6; i++) {
+      const cx = 100 + i * 200;
+      const ch = 90 + ((i * 61) % 120);
+      for (let s = 0; s < 4; s++) {
+        const r = 46 - s * 8;
+        bc.beginPath();
+        bc.arc(cx + ((s * 23) % 17) - 8, base - 30 - s * (ch / 4), r, 0, Math.PI * 2);
+        bc.fill();
+      }
+    }
+  }
+
+  biomeBackdropFor = currentBiome;
 }
 
 // --- Boss Fight System ---
@@ -998,34 +1258,52 @@ const BOSS_TYPES = {
     reward: 25
   },
   kraljDjavola: {
+    // Level 9 (Pakao) - the devil king fights on his home turf
     name: 'KRALJ \u0110AVOLA',
     emoji: '\u{1F47F}',
-    hp: 32, maxHp: 32,
+    hp: 28, maxHp: 28,
     speed: 72,
     size: 110,
     attacks: ['fireball', 'teleport', 'summon', 'rain'],
-    level: 7,
+    level: 9,
     color: '#440000',
-    reward: 40
+    reward: 45
   },
   zloFarmer: {
+    // Level 7 (Sne\u017Ena Planina) - a farmer on a snowy mountain farm
     name: 'ZLO FARMER',
     emoji: '\u{1F468}\u200D\u{1F33E}',
-    hp: 16, maxHp: 16,
-    speed: 48,
+    hp: 24, maxHp: 24,
+    speed: 76,
     size: 85,
-    attacks: ['pitchfork', 'charge', 'trap'],
-    level: 9,
+    attacks: ['pitchfork', 'charge', 'trap', 'slam'],
+    level: 7,
     color: '#4A3000',
-    reward: 30
+    reward: 40
+  },
+  kraljKlanice: {
+    // Final boss - one attack borrowed from every boss before him,
+    // so level 10 is the climax instead of a plain level
+    name: 'KRALJ KLANICE',
+    emoji: '\u{1F9CC}',
+    hp: 36, maxHp: 36,
+    speed: 78,
+    size: 120,
+    attacks: ['knives', 'fireball', 'slam', 'charge', 'rain'],
+    level: 10,
+    color: '#2B0A2E',
+    reward: 60
   }
 };
 
 function getBossForLevel(level) {
   if (level === 3) return 'velikiVuk';
   if (level === 5) return 'megaKasapin';
-  if (level === 7) return 'kraljDjavola';
-  if (level === 9) return 'zloFarmer';
+  // Thematic pairing with the biomes: the farmer belongs on his snowy farm
+  // (level 7 = Snežna Planina), the devil king belongs in hell (level 9 = Pakao)
+  if (level === 7) return 'zloFarmer';
+  if (level === 9) return 'kraljDjavola';
+  if (level === 10) return 'kraljKlanice';
   return null;
 }
 
@@ -1121,6 +1399,7 @@ function updateClouds(dt) {
 // --- Piggy Visual State ---
 let piggyBobTimer = 0;
 let piggyDamageTimer = 0; // red tint + scale pulse on damage
+let invulnTimer = 0; // brief invulnerability after taking a hit (prevents multi-hit in one frame)
 
 // --- HUD bounce ---
 let scoreBounceFactor = 0;
@@ -1132,10 +1411,35 @@ let titleCoinTimer = 0;
 // --- Audio ---
 let audioCtx = null;
 let audioUnlocked = false;
+let audioUnlockedAt = 0; // when the unlock happened (document-level listeners fire before game handlers)
+// Audio bus architecture: every sound goes through sfxBus or musicBus, both
+// feed masterBus -> destination. This gives one master mute/volume point
+// instead of dozens of hardcoded connections to ctx.destination.
+let masterBus = null, musicBus = null, sfxBus = null;
+let isMuted = false;
+try { isMuted = localStorage.getItem('kasicaMuted') === '1'; } catch(e) {}
 function getAudioContext() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterBus = audioCtx.createGain();
+    masterBus.gain.value = isMuted ? 0 : 1;
+    masterBus.connect(audioCtx.destination);
+    musicBus = audioCtx.createGain();
+    musicBus.gain.value = 1;
+    musicBus.connect(masterBus);
+    sfxBus = audioCtx.createGain();
+    sfxBus.gain.value = 1;
+    sfxBus.connect(masterBus);
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+function toggleMute() {
+  isMuted = !isMuted;
+  try { localStorage.setItem('kasicaMuted', isMuted ? '1' : '0'); } catch(e) {}
+  if (masterBus && audioCtx) {
+    masterBus.gain.setTargetAtTime(isMuted ? 0 : 1, audioCtx.currentTime, 0.02);
+  }
 }
 // Unlock audio on ANY user interaction (click, touch, key)
 function unlockAudio() {
@@ -1147,9 +1451,10 @@ function unlockAudio() {
     const buf = ctx.createBuffer(1, 1, 22050);
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(ctx.destination);
+    src.connect(sfxBus);
     src.start(0);
     audioUnlocked = true;
+    audioUnlockedAt = performance.now();
     // If game is already playing but music hasn't started, start it now
     if (game.screen === 'playing' && !musicPlaying) {
       startMusic();
@@ -1164,24 +1469,48 @@ document.addEventListener('click', unlockAudio, { passive: true });
 document.addEventListener('touchstart', unlockAudio, { passive: true });
 document.addEventListener('touchend', unlockAudio, { passive: true });
 document.addEventListener('keydown', unlockAudio, { once: false });
+// Hidden tab: the game loop (rAF) freezes but setTimeout-driven music would
+// keep blaring - suspend the whole audio context until the tab is visible again
+document.addEventListener('visibilitychange', () => {
+  if (!audioCtx) return;
+  try {
+    if (document.hidden) audioCtx.suspend();
+    else if (audioUnlocked) audioCtx.resume();
+  } catch(e) {}
+});
 
 // --- Intro Scene Music ---
+// Scenes 3 and 4 share the hope theme - treat them as one musical unit so the
+// crescendo keeps building across the scene cut instead of restarting.
+function introThemeFor(scene) {
+  return scene === 4 ? 3 : scene;
+}
+
 function stopIntroMusic() {
   currentIntroMusic = -1;
+  playingIntroTheme = -1;
+  introMusicNextStart = 0;
   if (introMusicTimeout) { clearTimeout(introMusicTimeout); introMusicTimeout = null; }
   introMusicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
   introMusicNodes = [];
+  introMusicOldNodes.forEach(n => { try { n.stop(); } catch(e) {} });
+  introMusicOldNodes = [];
 }
 
 function scheduleIntroLoop(sceneIndex, duration) {
+  // Look-ahead loop: wake up ~150ms before the theme's musical end and start
+  // the next pass at EXACTLY the end time. The old nodes already have their
+  // stop() scheduled at the boundary, so nothing is cut and nothing gaps.
+  const endAt = introThemeStartAt + duration;
+  let ms = duration * 1000 - 150;
+  try { ms = Math.max(50, (endAt - audioCtx.currentTime) * 1000 - 150); } catch(e) {}
   introMusicTimeout = setTimeout(() => {
-    if (currentIntroMusic === sceneIndex) {
-      introMusicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
-      introMusicNodes = [];
-      currentIntroMusic = -1;
-      playIntroMusic(sceneIndex);
+    if (currentIntroMusic !== -1 && introThemeFor(currentIntroMusic) === introThemeFor(sceneIndex)) {
+      introMusicNextStart = endAt;
+      playIntroMusic(currentIntroMusic);
+      introMusicNextStart = 0;
     }
-  }, duration * 1000 - 50);
+  }, ms);
 }
 
 function playHappyFarmTheme(actx, now, nodes, master) {
@@ -1489,17 +1818,32 @@ function forceRestartIntroMusic() {
 }
 
 function playIntroMusic(sceneIndex) {
-  if (currentIntroMusic === sceneIndex) return;
-  stopIntroMusic();
+  const seamless = introMusicNextStart > 0; // loop restart from scheduleIntroLoop
+  if (!seamless) {
+    if (currentIntroMusic === sceneIndex) return;
+    // Same theme already sounding (scene 3 -> 4, or title reusing the farm
+    // theme after a forced -1): keep it playing instead of restarting.
+    if (introMusicNodes.length > 0 && playingIntroTheme === introThemeFor(sceneIndex)) {
+      currentIntroMusic = sceneIndex;
+      return;
+    }
+    stopIntroMusic();
+  } else if (introMusicTimeout) {
+    clearTimeout(introMusicTimeout);
+    introMusicTimeout = null;
+  }
   if (!audioUnlocked) return; // browser hasn't had user gesture yet
   currentIntroMusic = sceneIndex;
+  playingIntroTheme = introThemeFor(sceneIndex);
 
   try {
     const actx = getAudioContext();
-    const now = actx.currentTime;
+    // Seamless restarts begin exactly where the previous pass musically ends
+    const now = seamless ? Math.max(actx.currentTime, introMusicNextStart) : actx.currentTime;
+    introThemeStartAt = now;
     const nodes = [];
     const master = actx.createGain();
-    master.connect(actx.destination);
+    master.connect(musicBus);
 
     switch(sceneIndex) {
       case 0: playHappyFarmTheme(actx, now, nodes, master); break;
@@ -1509,15 +1853,24 @@ function playIntroMusic(sceneIndex) {
       case 5: playTutorialTheme(actx, now, nodes, master); break;
     }
 
+    if (seamless) {
+      // Previous pass keeps ringing until the boundary, then stops on its own
+      introMusicOldNodes = introMusicNodes;
+    }
     introMusicNodes = nodes;
   } catch(e) {}
 }
 
-function playSqueal() {
+function playSqueal(vol) {
+  // vol < 1 gives a quieter "whimper" variant - a squeal every 0.5s at full
+  // blast for 10s of shaking was physically painful on headphones
   try {
   const actx = getAudioContext();
   const t = actx.currentTime;
   const duration = 0.5;
+  const out = actx.createGain();
+  out.gain.value = 0.5 * (vol === undefined ? 1 : vol);
+  out.connect(sfxBus);
 
   // Layer 1: Main vocal scream - starts at 600Hz, sweeps to 1500Hz
   const osc1 = actx.createOscillator();
@@ -1551,7 +1904,7 @@ function playSqueal() {
 
   osc1.connect(formant1);
   formant1.connect(gain1);
-  gain1.connect(actx.destination);
+  gain1.connect(out);
   osc1.start(t);
   osc1.stop(t + duration);
   tremolo.start(t);
@@ -1579,7 +1932,7 @@ function playSqueal() {
 
   osc2.connect(formant2);
   formant2.connect(gain2);
-  gain2.connect(actx.destination);
+  gain2.connect(out);
   osc2.start(t);
   osc2.stop(t + duration);
 
@@ -1594,7 +1947,7 @@ function playSqueal() {
   gain3.gain.linearRampToValueAtTime(0.05, t + 0.3);
   gain3.gain.linearRampToValueAtTime(0, t + duration);
   osc3.connect(gain3);
-  gain3.connect(actx.destination);
+  gain3.connect(out);
   osc3.start(t);
   osc3.stop(t + duration);
 
@@ -1616,7 +1969,7 @@ function playSqueal() {
   noiseGain.gain.linearRampToValueAtTime(0, t + 0.4);
   noise.connect(hpFilter);
   hpFilter.connect(noiseGain);
-  noiseGain.connect(actx.destination);
+  noiseGain.connect(out);
   noise.start(t);
   noise.stop(t + 0.4);
   } catch (e) {}
@@ -1632,21 +1985,21 @@ function playShakeSound() {
   gain.gain.setValueAtTime(0.1, ctx.currentTime);
   gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.05);
   osc.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(sfxBus);
   osc.start();
   osc.stop(ctx.currentTime + 0.05);
 }
 
-function playCoinCollect() {
+function playCoinCollect(freq) {
   const actx = getAudioContext();
   const osc = actx.createOscillator();
   const gain = actx.createGain();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(880, actx.currentTime);
-  gain.gain.setValueAtTime(0.12, actx.currentTime);
+  osc.frequency.setValueAtTime(freq || 880, actx.currentTime);
+  gain.gain.setValueAtTime(0.16, actx.currentTime);
   gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.1);
   osc.connect(gain);
-  gain.connect(actx.destination);
+  gain.connect(sfxBus);
   osc.start();
   osc.stop(actx.currentTime + 0.1);
 }
@@ -1658,10 +2011,10 @@ function playBillCollect() {
     const gain = actx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, actx.currentTime + i * 0.08);
-    gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.08);
+    gain.gain.setValueAtTime(0.15, actx.currentTime + i * 0.08);
     gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.08 + 0.1);
     osc.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     osc.start(actx.currentTime + i * 0.08);
     osc.stop(actx.currentTime + i * 0.08 + 0.1);
   });
@@ -1674,10 +2027,10 @@ function playGoldCollect() {
     const gain = actx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, actx.currentTime);
-    gain.gain.setValueAtTime(0.1, actx.currentTime);
+    gain.gain.setValueAtTime(0.14, actx.currentTime);
     gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.25);
     osc.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     osc.start();
     osc.stop(actx.currentTime + 0.25);
   });
@@ -1694,7 +2047,7 @@ function playBombExplosion() {
   gain.gain.setValueAtTime(0.2, actx.currentTime);
   gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.3);
   osc.connect(gain);
-  gain.connect(actx.destination);
+  gain.connect(sfxBus);
   osc.start();
   osc.stop(actx.currentTime + 0.3);
   // Noise burst
@@ -1710,7 +2063,7 @@ function playBombExplosion() {
   noiseGain.gain.setValueAtTime(0.15, actx.currentTime);
   noiseGain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.15);
   noise.connect(noiseGain);
-  noiseGain.connect(actx.destination);
+  noiseGain.connect(sfxBus);
   noise.start();
   noise.stop(actx.currentTime + 0.15);
 }
@@ -1725,7 +2078,7 @@ function playDevilLatch() {
   gain.gain.setValueAtTime(0.12, actx.currentTime);
   gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.5);
   osc.connect(gain);
-  gain.connect(actx.destination);
+  gain.connect(sfxBus);
   osc.start();
   osc.stop(actx.currentTime + 0.5);
 }
@@ -1745,7 +2098,7 @@ function playShakeSuccess() {
   noiseGain.gain.setValueAtTime(0.1, actx.currentTime);
   noiseGain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.15);
   noise.connect(noiseGain);
-  noiseGain.connect(actx.destination);
+  noiseGain.connect(sfxBus);
   noise.start();
   noise.stop(actx.currentTime + 0.15);
   // Short percussive "bonk"
@@ -1756,7 +2109,7 @@ function playShakeSuccess() {
   gain.gain.setValueAtTime(0.15, actx.currentTime + 0.1);
   gain.gain.linearRampToValueAtTime(0, actx.currentTime + 0.18);
   osc.connect(gain);
-  gain.connect(actx.destination);
+  gain.connect(sfxBus);
   osc.start(actx.currentTime + 0.1);
   osc.stop(actx.currentTime + 0.18);
 }
@@ -1773,7 +2126,7 @@ function playLevelComplete() {
     gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.15);
     gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.15 + 0.3);
     osc.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     osc.start(actx.currentTime + i * 0.15);
     osc.stop(actx.currentTime + i * 0.15 + 0.3);
   });
@@ -1791,7 +2144,7 @@ function playGameOver() {
     gain.gain.setValueAtTime(0.12, actx.currentTime + i * 0.2);
     gain.gain.linearRampToValueAtTime(0, actx.currentTime + i * 0.2 + 0.35);
     osc.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     osc.start(actx.currentTime + i * 0.2);
     osc.stop(actx.currentTime + i * 0.2 + 0.35);
   });
@@ -1818,8 +2171,8 @@ function playFartSound() {
     vibrato.connect(vibGain);
     vibGain.connect(osc1.frequency);
 
-    gain1.gain.setValueAtTime(0.3, t);
-    gain1.gain.linearRampToValueAtTime(0.4, t + 0.08);
+    gain1.gain.setValueAtTime(0.24, t);
+    gain1.gain.linearRampToValueAtTime(0.3, t + 0.08);
     gain1.gain.linearRampToValueAtTime(0.2, t + 0.25);
     gain1.gain.linearRampToValueAtTime(0, t + 0.45);
 
@@ -1830,7 +2183,7 @@ function playFartSound() {
 
     osc1.connect(lpf);
     lpf.connect(gain1);
-    gain1.connect(ctx.destination);
+    gain1.connect(sfxBus);
     vibrato.start(t);
     osc1.start(t);
     osc1.stop(t + 0.45);
@@ -1853,7 +2206,7 @@ function playFartSound() {
     nFilter.frequency.value = 300;
     noise.connect(nFilter);
     nFilter.connect(nGain);
-    nGain.connect(ctx.destination);
+    nGain.connect(sfxBus);
     noise.start(t);
     noise.stop(t + 0.3);
 
@@ -1867,7 +2220,7 @@ function playFartSound() {
     squeakGain.gain.linearRampToValueAtTime(0.08, t + 0.33);
     squeakGain.gain.linearRampToValueAtTime(0, t + 0.4);
     squeak.connect(squeakGain);
-    squeakGain.connect(ctx.destination);
+    squeakGain.connect(sfxBus);
     squeak.start(t + 0.3);
     squeak.stop(t + 0.4);
   } catch(e) {}
@@ -1888,7 +2241,7 @@ function playChokingSound() {
       gain.gain.setValueAtTime(0.12, startT);
       gain.gain.linearRampToValueAtTime(0, startT + 0.12);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxBus);
       osc.start(startT);
       osc.stop(startT + 0.12);
     }
@@ -1925,7 +2278,7 @@ function playThunderRumble() {
     gain.gain.linearRampToValueAtTime(0, now + 2.0);
     noise.connect(filter);
     filter.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     noise.start(now);
     noise.stop(now + 2.0);
   } catch(e) {}
@@ -1950,11 +2303,11 @@ function playThunderCrack() {
     filter.frequency.setValueAtTime(200, now);
     filter.Q.value = 0.5;
     const gain = actx.createGain();
-    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.setValueAtTime(0.3, now);
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
     noise.connect(filter);
     filter.connect(gain);
-    gain.connect(actx.destination);
+    gain.connect(sfxBus);
     noise.start(now);
     noise.stop(now + 0.8);
   } catch(e) {}
@@ -1975,10 +2328,10 @@ function playThunderStrike() {
     const crack = actx.createBufferSource();
     crack.buffer = crackBuf;
     const crackGain = actx.createGain();
-    crackGain.gain.setValueAtTime(0.7, now);
+    crackGain.gain.setValueAtTime(0.35, now);
     crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
     crack.connect(crackGain);
-    crackGain.connect(actx.destination);
+    crackGain.connect(sfxBus);
     crack.start(now);
     crack.stop(now + 0.15);
     // Rumble tail
@@ -1996,11 +2349,11 @@ function playThunderStrike() {
     tailFilter.type = 'lowpass';
     tailFilter.frequency.value = 100;
     const tailGain = actx.createGain();
-    tailGain.gain.setValueAtTime(0.3, now + 0.1);
+    tailGain.gain.setValueAtTime(0.22, now + 0.1);
     tailGain.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
     tail.connect(tailFilter);
     tailFilter.connect(tailGain);
-    tailGain.connect(actx.destination);
+    tailGain.connect(sfxBus);
     tail.start(now + 0.1);
     tail.stop(now + 1.5);
     // Electric zap overtone
@@ -2009,10 +2362,10 @@ function playThunderStrike() {
     zap.frequency.setValueAtTime(800, now);
     zap.frequency.exponentialRampToValueAtTime(50, now + 0.3);
     const zapGain = actx.createGain();
-    zapGain.gain.setValueAtTime(0.15, now);
+    zapGain.gain.setValueAtTime(0.1, now);
     zapGain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
     zap.connect(zapGain);
-    zapGain.connect(actx.destination);
+    zapGain.connect(sfxBus);
     zap.start(now);
     zap.stop(now + 0.3);
   } catch(e) {}
@@ -2031,7 +2384,7 @@ function playPoopSound() {
     gain.gain.setValueAtTime(0.3, t);
     gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(sfxBus);
     osc.start(t);
     osc.stop(t + 0.4);
 
@@ -2044,7 +2397,7 @@ function playPoopSound() {
     noiseGain.gain.setValueAtTime(0.2, t + 0.1);
     noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
     noise.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
+    noiseGain.connect(sfxBus);
     noise.start(t + 0.1);
     noise.stop(t + 0.3);
   } catch(e) {}
@@ -2060,7 +2413,7 @@ function playWetFartSound() {
     osc.frequency.setValueAtTime(60, now);
     osc.frequency.linearRampToValueAtTime(30, now + 0.5);
     const gain = actx.createGain();
-    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.setValueAtTime(0.3, now);
     gain.gain.linearRampToValueAtTime(0, now + 0.6);
     // Wet splatter
     const noise = actx.createOscillator();
@@ -2068,7 +2421,7 @@ function playWetFartSound() {
     noise.frequency.setValueAtTime(120, now);
     noise.frequency.exponentialRampToValueAtTime(20, now + 0.4);
     const noiseGain = actx.createGain();
-    noiseGain.gain.setValueAtTime(0.2, now + 0.1);
+    noiseGain.gain.setValueAtTime(0.16, now + 0.1);
     noiseGain.gain.linearRampToValueAtTime(0, now + 0.5);
     // Squish sound
     const squish = actx.createOscillator();
@@ -2079,22 +2432,317 @@ function playWetFartSound() {
     squishGain.gain.setValueAtTime(0.15, now);
     squishGain.gain.linearRampToValueAtTime(0, now + 0.3);
 
-    osc.connect(gain); gain.connect(actx.destination);
-    noise.connect(noiseGain); noiseGain.connect(actx.destination);
-    squish.connect(squishGain); squishGain.connect(actx.destination);
+    osc.connect(gain); gain.connect(sfxBus);
+    noise.connect(noiseGain); noiseGain.connect(sfxBus);
+    squish.connect(squishGain); squishGain.connect(sfxBus);
     osc.start(now); osc.stop(now + 0.6);
     noise.start(now + 0.1); noise.stop(now + 0.5);
     squish.start(now); squish.stop(now + 0.3);
   } catch(e) {}
 }
 
+// --- Boss & Feedback SFX ---
+function playBossHit() {
+  // Short meaty "thud" - the player must HEAR that the fart connected
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.12);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.12);
+    osc.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 0.12);
+    const bufSize = Math.floor(actx.sampleRate * 0.06);
+    const buf = actx.createBuffer(1, bufSize, actx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+    const noise = actx.createBufferSource();
+    noise.buffer = buf;
+    const nGain = actx.createGain();
+    nGain.gain.setValueAtTime(0.12, t);
+    nGain.gain.linearRampToValueAtTime(0, t + 0.06);
+    noise.connect(nGain); nGain.connect(sfxBus);
+    noise.start(t); noise.stop(t + 0.06);
+  } catch(e) {}
+}
+
+function playBossRoar() {
+  // Menacing entrance roar: low sawtooth with slow vibrato
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.linearRampToValueAtTime(140, t + 0.3);
+    osc.frequency.linearRampToValueAtTime(70, t + 1.0);
+    const vib = actx.createOscillator();
+    vib.frequency.value = 8;
+    const vibGain = actx.createGain();
+    vibGain.gain.value = 12;
+    vib.connect(vibGain); vibGain.connect(osc.frequency);
+    const lpf = actx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = 500;
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.3, t + 0.1);
+    gain.gain.setValueAtTime(0.3, t + 0.6);
+    gain.gain.linearRampToValueAtTime(0, t + 1.0);
+    osc.connect(lpf); lpf.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 1.0);
+    vib.start(t); vib.stop(t + 1.0);
+  } catch(e) {}
+}
+
+function playBossPhaseTwo() {
+  // Rising tension riser: things just got serious
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.exponentialRampToValueAtTime(440, t + 0.8);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.linearRampToValueAtTime(0.22, t + 0.7);
+    gain.gain.linearRampToValueAtTime(0, t + 0.85);
+    osc.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 0.85);
+  } catch(e) {}
+}
+
+function playBossDeath() {
+  // Explosion + long descending "falling" tone
+  try {
+    playBombExplosion();
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 1.2);
+    const lpf = actx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = 800;
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.22, t);
+    gain.gain.linearRampToValueAtTime(0, t + 1.2);
+    osc.connect(lpf); lpf.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 1.2);
+  } catch(e) {}
+}
+
+function playWolfHowl() {
+  // AUUUUU! - rising-falling sine with slow vibrato
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(300, t);
+    osc.frequency.linearRampToValueAtTime(600, t + 0.35);
+    osc.frequency.setValueAtTime(600, t + 0.6);
+    osc.frequency.linearRampToValueAtTime(400, t + 1.2);
+    const vib = actx.createOscillator();
+    vib.frequency.value = 5;
+    const vibGain = actx.createGain();
+    vibGain.gain.value = 20;
+    vib.connect(vibGain); vibGain.connect(osc.frequency);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.2, t + 0.25);
+    gain.gain.setValueAtTime(0.2, t + 0.7);
+    gain.gain.linearRampToValueAtTime(0, t + 1.2);
+    osc.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 1.2);
+    vib.start(t); vib.stop(t + 1.2);
+  } catch(e) {}
+}
+
+let lastDevilLaughAt = 0;
+function playDevilLaugh() {
+  // Staccato "he-he-he" for the game over devils (throttled so 4 devils
+  // laughing at once don't turn into a wall of noise)
+  try {
+    const nowMs = performance.now();
+    if (nowMs - lastDevilLaughAt < 1200) return;
+    lastDevilLaughAt = nowMs;
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    [200, 250, 200].forEach((freq, i) => {
+      const osc = actx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      const gain = actx.createGain();
+      const st = t + i * 0.12;
+      gain.gain.setValueAtTime(0.08, st);
+      gain.gain.linearRampToValueAtTime(0, st + 0.08);
+      osc.connect(gain); gain.connect(sfxBus);
+      osc.start(st); osc.stop(st + 0.08);
+    });
+  } catch(e) {}
+}
+
+function playJackpot() {
+  // Moneybag (30): fast ascending 5-note arpeggio + shimmer - the best catch
+  // must SOUND like the best catch
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    [523.3, 659.3, 784.0, 1046.5, 1318.5].forEach((freq, i) => {
+      const osc = actx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const gain = actx.createGain();
+      const st = t + i * 0.06;
+      gain.gain.setValueAtTime(0.14, st);
+      gain.gain.linearRampToValueAtTime(0, st + 0.3);
+      osc.connect(gain); gain.connect(sfxBus);
+      osc.start(st); osc.stop(st + 0.3);
+    });
+    // Shimmer on top
+    const sh = actx.createOscillator();
+    sh.type = 'triangle';
+    sh.frequency.setValueAtTime(2093, t + 0.3);
+    const shGain = actx.createGain();
+    shGain.gain.setValueAtTime(0.08, t + 0.3);
+    shGain.gain.linearRampToValueAtTime(0, t + 0.7);
+    sh.connect(shGain); shGain.connect(sfxBus);
+    sh.start(t + 0.3); sh.stop(t + 0.7);
+  } catch(e) {}
+}
+
+function playPurchase() {
+  // Shop "ka-ching": ascending arpeggio + coin-drop tick
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    [660, 880, 1320].forEach((freq, i) => {
+      const osc = actx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const gain = actx.createGain();
+      const st = t + i * 0.07;
+      gain.gain.setValueAtTime(0.15, st);
+      gain.gain.linearRampToValueAtTime(0, st + 0.25);
+      osc.connect(gain); gain.connect(sfxBus);
+      osc.start(st); osc.stop(st + 0.25);
+    });
+    const tick = actx.createOscillator();
+    tick.type = 'square';
+    tick.frequency.setValueAtTime(2400, t + 0.22);
+    const tickGain = actx.createGain();
+    tickGain.gain.setValueAtTime(0.06, t + 0.22);
+    tickGain.gain.linearRampToValueAtTime(0, t + 0.3);
+    tick.connect(tickGain); tickGain.connect(sfxBus);
+    tick.start(t + 0.22); tick.stop(t + 0.3);
+  } catch(e) {}
+}
+
+function playErrorBuzz() {
+  // Short "you can't afford that" buzz
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = 110;
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.1, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.15);
+    osc.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 0.15);
+  } catch(e) {}
+}
+
+function playJumpSound() {
+  // Tiny "boing" - jumping should feel juicy
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const osc = actx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(300, t);
+    osc.frequency.linearRampToValueAtTime(520, t + 0.1);
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.1, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.12);
+    osc.connect(gain); gain.connect(sfxBus);
+    osc.start(t); osc.stop(t + 0.12);
+  } catch(e) {}
+}
+
+function playBuildSound() {
+  // Three quick hammer taps + a little "ta-da" for the finished house
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const st = t + i * 0.14;
+      const osc = actx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, st);
+      osc.frequency.exponentialRampToValueAtTime(90, st + 0.07);
+      const gain = actx.createGain();
+      gain.gain.setValueAtTime(0.2, st);
+      gain.gain.linearRampToValueAtTime(0, st + 0.08);
+      osc.connect(gain); gain.connect(sfxBus);
+      osc.start(st); osc.stop(st + 0.08);
+    }
+    [523.3, 784.0].forEach((freq, i) => {
+      const st = t + 0.48 + i * 0.1;
+      const osc = actx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const gain = actx.createGain();
+      gain.gain.setValueAtTime(0.12, st);
+      gain.gain.linearRampToValueAtTime(0, st + 0.25);
+      osc.connect(gain); gain.connect(sfxBus);
+      osc.start(st); osc.stop(st + 0.25);
+    });
+  } catch(e) {}
+}
+
+function playHurtOink() {
+  // Sad descending oink when the piggy takes a crack - damage was silent
+  // (bombs excepted) which made hits easy to miss
+  try {
+    const actx = getAudioContext();
+    const t = actx.currentTime;
+    const voice = actx.createOscillator();
+    voice.type = 'sawtooth';
+    voice.frequency.setValueAtTime(320, t);
+    voice.frequency.linearRampToValueAtTime(220, t + 0.12);
+    voice.frequency.linearRampToValueAtTime(120, t + 0.35);
+    const nasal = actx.createBiquadFilter();
+    nasal.type = 'bandpass';
+    nasal.frequency.value = 900;
+    nasal.Q.value = 3;
+    const env = actx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(0.3, t + 0.03);
+    env.gain.linearRampToValueAtTime(0, t + 0.35);
+    voice.connect(nasal); nasal.connect(env); env.connect(sfxBus);
+    voice.start(t); voice.stop(t + 0.35);
+  } catch(e) {}
+}
+
 // --- Background Music System ---
 let musicPlaying = false;
 let musicNodes = null;
+let prevMusicNodes = null; // look-ahead scheduling keeps two bars alive at the seam
 let beatCount = 0;
 let beatTimer = 0;
 const BPM = 140;
 const BEAT_DURATION = 60 / BPM;
+let currentBeatDuration = BEAT_DURATION; // actual beat length (tempo scales with level)
+let nextBarTime = 0; // audioCtx time where the next bar must start (seamless loop)
 let musicLoopTimeout = null;
 
 function playOink(delay) {
@@ -2139,7 +2787,7 @@ function playOink(delay) {
     voice.connect(nasal);
     nasal.connect(env);
     env.connect(oinkMaster);
-    oinkMaster.connect(actx.destination);
+    oinkMaster.connect(sfxBus);
     vibrato.start(t);
     voice.start(t);
     voice.stop(t + duration);
@@ -2162,11 +2810,13 @@ function startMusic() {
   musicPlaying = true;
   beatCount = 0;
   beatTimer = 0;
+  nextBarTime = 0;
   scheduleMusicalBar();
 }
 
 function stopMusic() {
   musicPlaying = false;
+  nextBarTime = 0;
   if (musicLoopTimeout) {
     clearTimeout(musicLoopTimeout);
     musicLoopTimeout = null;
@@ -2175,24 +2825,51 @@ function stopMusic() {
     musicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
     musicNodes = null;
   }
+  if (prevMusicNodes) {
+    prevMusicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
+    prevMusicNodes = null;
+  }
 }
 
 function scheduleMusicalBar() {
   if (!musicPlaying) return;
   try {
     const actx = getAudioContext();
-    const now = actx.currentTime;
+    // Look-ahead scheduling ("A Tale of Two Clocks"): each 4-bar phrase starts
+    // EXACTLY where the previous one musically ends - no more cutting the last
+    // eighth note and the audible hiccup every loop.
+    const now = (nextBarTime > actx.currentTime + 0.01) ? nextBarTime : actx.currentTime + 0.05;
     const nodes = [];
     const masterGain = actx.createGain();
     masterGain.gain.value = 0.12;
-    masterGain.connect(actx.destination);
+    masterGain.connect(musicBus);
 
-    const beatLen = BEAT_DURATION;
+    // --- Adaptive parameters: the music changes with the game ---
+    const level = Math.max(1, Math.min(10, game.level || 1));
+    // Tempo climbs with level (124 -> 160 BPM); boss fights push it further
+    let bpm = 120 + level * 4;
+    if (bossActive) bpm = Math.round(bpm * 1.12);
+    const beatLen = 60 / bpm;
+    currentBeatDuration = beatLen;
     const barLen = beatLen * 4;
     const totalBars = 4;
     const totalDuration = barLen * totalBars;
+    // Transpose up a semitone every 2 levels; boss theme sits a semitone DOWN
+    // from the level for a darker color
+    const semis = Math.floor((level - 1) / 2) - (bossActive ? 1 : 0);
+    const tr = Math.pow(2, semis / 12);
+    // Biome character: melody timbre follows the world you're in
+    let melType = 'triangle', melVol = 0.25;
+    if (currentBiome === BIOMES.grad) { melType = 'square'; melVol = 0.13; }
+    else if (currentBiome === BIOMES.pakao) { melType = 'square'; melVol = 0.14; }
+    else if (currentBiome === BIOMES.sneg) { melType = 'sine'; melVol = 0.3; }
+    else if (currentBiome === BIOMES.oblaci) { melType = 'sine'; melVol = 0.3; }
+    // Tension layer: near-death or a latched devil doubles the hi-hat;
+    // the last 10 seconds of a level push the melody up an octave + tick-tock
+    const tense = (game.cracks >= (game.maxCracks || 3) - 1) || !!game.latchedDevil;
+    const finalRush = !bossActive && game.levelTimer > 0 && game.levelTimer < 10;
 
-    // --- Bass line (square wave, low) ---
+    // --- Bass line ---
     // 4 bars: C2-C2-Eb2-G2 | Ab1-Ab1-G1-F1 | C2-C2-Eb2-G2 | Ab1-Ab1-G1-F1
     const bassNotes = [
       65.41, 65.41, 77.78, 98.00,
@@ -2201,20 +2878,28 @@ function scheduleMusicalBar() {
       51.91, 51.91, 49.00, 43.65
     ];
     const bassOsc = actx.createOscillator();
-    bassOsc.type = 'square';
+    bassOsc.type = (currentBiome === BIOMES.pakao) ? 'sawtooth' : 'square';
     const bassGain = actx.createGain();
-    bassGain.gain.value = 0.35;
+    bassGain.gain.value = bossActive ? 0.4 : 0.35;
     bassOsc.connect(bassGain);
     bassGain.connect(masterGain);
-    for (let i = 0; i < bassNotes.length; i++) {
-      const t = now + i * beatLen;
-      bassOsc.frequency.setValueAtTime(bassNotes[i], t);
+    if (bossActive) {
+      // Boss variant: driving eighth-note bass pulse alternating the octave
+      for (let i = 0; i < bassNotes.length * 2; i++) {
+        const t = now + i * (beatLen / 2);
+        bassOsc.frequency.setValueAtTime(bassNotes[i >> 1] * tr * (i % 2 ? 2 : 1), t);
+      }
+    } else {
+      for (let i = 0; i < bassNotes.length; i++) {
+        const t = now + i * beatLen;
+        bassOsc.frequency.setValueAtTime(bassNotes[i] * tr, t);
+      }
     }
     bassOsc.start(now);
     bassOsc.stop(now + totalDuration);
     nodes.push(bassOsc);
 
-    // --- Melody (triangle wave, higher octave) ---
+    // --- Melody ---
     // 8th notes = beatLen/2, 32 notes total for 4 bars
     const melodyNotes = [
       // Bar 1: C4-Eb4-G4-C5 ascending playful
@@ -2227,18 +2912,31 @@ function scheduleMusicalBar() {
       196.0, 155.6, 261.6, 196.0, 261.6, 311.1, 261.6, 196.0
     ];
     const melOsc = actx.createOscillator();
-    melOsc.type = 'triangle';
+    // Boss fight: no cheerful tune - a dark sustained line an octave up from
+    // the bass roots, sawtooth and quiet, lets the pulse dominate
+    melOsc.type = bossActive ? 'sawtooth' : melType;
+    const useMelVol = bossActive ? 0.1 : melVol;
+    const melMul = tr * (finalRush ? 2 : 1); // final 10s: octave up = "hurry!"
     const melGain = actx.createGain();
-    melGain.gain.value = 0.25;
+    melGain.gain.value = useMelVol;
     melOsc.connect(melGain);
     melGain.connect(masterGain);
     const eighthNote = beatLen / 2;
-    for (let i = 0; i < melodyNotes.length; i++) {
-      const t = now + i * eighthNote;
-      melOsc.frequency.setValueAtTime(melodyNotes[i], t);
-      // Add slight volume pulse per note for bounce
-      melGain.gain.setValueAtTime(0.25, t);
-      melGain.gain.linearRampToValueAtTime(0.15, t + eighthNote * 0.8);
+    if (bossActive) {
+      for (let i = 0; i < bassNotes.length; i++) {
+        const t = now + i * beatLen;
+        melOsc.frequency.setValueAtTime(bassNotes[i] * 4 * tr, t);
+        melGain.gain.setValueAtTime(useMelVol, t);
+        melGain.gain.linearRampToValueAtTime(useMelVol * 0.5, t + beatLen * 0.9);
+      }
+    } else {
+      for (let i = 0; i < melodyNotes.length; i++) {
+        const t = now + i * eighthNote;
+        melOsc.frequency.setValueAtTime(melodyNotes[i] * melMul, t);
+        // Add slight volume pulse per note for bounce
+        melGain.gain.setValueAtTime(useMelVol, t);
+        melGain.gain.linearRampToValueAtTime(useMelVol * 0.6, t + eighthNote * 0.8);
+      }
     }
     melOsc.start(now);
     melOsc.stop(now + totalDuration);
@@ -2247,29 +2945,32 @@ function scheduleMusicalBar() {
     // --- Percussion ---
     // Kick on beats 1,3 - low noise burst
     // Snare on beats 2,4 - mid noise burst
-    // Hi-hat on every beat - high noise short
+    // Hi-hat every beat (eighth notes when tense or fighting a boss)
+    const makeHat = (t, vol) => {
+      const hhBuf = actx.createBuffer(1, actx.sampleRate * 0.03, actx.sampleRate);
+      const hhData = hhBuf.getChannelData(0);
+      for (let s = 0; s < hhData.length; s++) hhData[s] = (Math.random() * 2 - 1) * (1 - s / hhData.length);
+      const hh = actx.createBufferSource();
+      hh.buffer = hhBuf;
+      const hhFilter = actx.createBiquadFilter();
+      hhFilter.type = 'highpass';
+      hhFilter.frequency.value = 7000;
+      const hhGain = actx.createGain();
+      hhGain.gain.setValueAtTime(vol, t);
+      hhGain.gain.linearRampToValueAtTime(0, t + 0.03);
+      hh.connect(hhFilter);
+      hhFilter.connect(hhGain);
+      hhGain.connect(masterGain);
+      hh.start(t);
+      hh.stop(t + 0.03);
+      nodes.push(hh);
+    };
     for (let bar = 0; bar < totalBars; bar++) {
       for (let beat = 0; beat < 4; beat++) {
         const t = now + (bar * 4 + beat) * beatLen;
 
-        // Hi-hat (every beat)
-        const hhBuf = actx.createBuffer(1, actx.sampleRate * 0.03, actx.sampleRate);
-        const hhData = hhBuf.getChannelData(0);
-        for (let s = 0; s < hhData.length; s++) hhData[s] = (Math.random() * 2 - 1) * (1 - s / hhData.length);
-        const hh = actx.createBufferSource();
-        hh.buffer = hhBuf;
-        const hhFilter = actx.createBiquadFilter();
-        hhFilter.type = 'highpass';
-        hhFilter.frequency.value = 7000;
-        const hhGain = actx.createGain();
-        hhGain.gain.setValueAtTime(0.6, t);
-        hhGain.gain.linearRampToValueAtTime(0, t + 0.03);
-        hh.connect(hhFilter);
-        hhFilter.connect(hhGain);
-        hhGain.connect(masterGain);
-        hh.start(t);
-        hh.stop(t + 0.03);
-        nodes.push(hh);
+        makeHat(t, 0.55);
+        if (tense || bossActive) makeHat(t + beatLen / 2, 0.35);
 
         if (beat === 0 || beat === 2) {
           // Kick
@@ -2308,20 +3009,52 @@ function scheduleMusicalBar() {
           sn.stop(t + 0.08);
           nodes.push(sn);
         }
+
+        if (bossActive) {
+          // Boss: floor tom on the "and" of every beat - war drums
+          const tom = actx.createOscillator();
+          tom.type = 'sine';
+          const tt = t + beatLen / 2;
+          tom.frequency.setValueAtTime(110, tt);
+          tom.frequency.linearRampToValueAtTime(70, tt + 0.09);
+          const tomGain = actx.createGain();
+          tomGain.gain.setValueAtTime(0.3, tt);
+          tomGain.gain.linearRampToValueAtTime(0, tt + 0.09);
+          tom.connect(tomGain);
+          tomGain.connect(masterGain);
+          tom.start(tt);
+          tom.stop(tt + 0.09);
+          nodes.push(tom);
+        }
+
+        if (finalRush) {
+          // Tick-tock woodblock: time is running out!
+          const tick = actx.createOscillator();
+          tick.type = 'square';
+          tick.frequency.setValueAtTime(beat % 2 ? 900 : 1350, t);
+          const tickGain = actx.createGain();
+          tickGain.gain.setValueAtTime(0.12, t);
+          tickGain.gain.linearRampToValueAtTime(0, t + 0.05);
+          tick.connect(tickGain);
+          tickGain.connect(masterGain);
+          tick.start(t);
+          tick.stop(t + 0.05);
+          nodes.push(tick);
+        }
       }
     }
 
-    // Store nodes so we can stop them
-    if (musicNodes) {
-      musicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
-    }
+    // The previous phrase's nodes all have stop() scheduled at this phrase's
+    // start - do NOT kill them early; keep one generation for stopMusic()
+    prevMusicNodes = musicNodes;
     musicNodes = nodes;
 
-    // Schedule next bar slightly before current ends
-    const scheduleAhead = totalDuration * 1000 - 100;
+    // Wake up ~200ms before this phrase ends to schedule the next one
+    nextBarTime = now + totalDuration;
+    const wakeMs = Math.max(10, (nextBarTime - actx.currentTime) * 1000 - 200);
     musicLoopTimeout = setTimeout(() => {
       if (musicPlaying) scheduleMusicalBar();
-    }, scheduleAhead);
+    }, wakeMs);
 
   } catch (e) {}
 }
@@ -2418,8 +3151,11 @@ function spawnObject() {
     return;
   }
 
-  // Corn for fart refill (only when farts < max)
-  if (fartCharges < MAX_FARTS && Math.random() < 0.06) {
+  // Corn for fart refill (only when farts < max).
+  // During a boss fight farts are the main weapon, so when the player is
+  // nearly empty corn comes much more often - no soft-locked boss levels.
+  const cornChance = (bossActive && fartCharges < 2) ? 0.25 : 0.06;
+  if (fartCharges < MAX_FARTS && Math.random() < cornChance) {
     const cornSize = 36;
     objects.push({
       type: 'corn',
@@ -2609,7 +3345,7 @@ function playButcherLatch() {
     gain.gain.linearRampToValueAtTime(0, t + 0.4);
     noise.connect(bp);
     bp.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(sfxBus);
     noise.start(t);
     noise.stop(t + 0.4);
 
@@ -2622,7 +3358,7 @@ function playButcherLatch() {
     oGain.gain.setValueAtTime(0.15, t);
     oGain.gain.linearRampToValueAtTime(0, t + 0.5);
     osc.connect(oGain);
-    oGain.connect(ctx.destination);
+    oGain.connect(sfxBus);
     osc.start(t);
     osc.stop(t + 0.5);
   } catch(e) {}
@@ -2642,7 +3378,7 @@ function playKnifeSound() {
     gain.gain.setValueAtTime(0.08, t);
     gain.gain.linearRampToValueAtTime(0, t + 0.08);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(sfxBus);
     osc.start(t);
     osc.stop(t + 0.08);
   } catch(e) {}
@@ -2668,6 +3404,7 @@ function buildHouse(type) {
   });
   spawnScorePopup(player.x, player.y - 60, ht.name + ' izgrađena! ' + ht.emoji, '#FFD700');
   spawnParticles(player.x, player.y, '🏠', 5, 80);
+  playBuildSound(); // hammer taps + ta-da: building was completely silent
   player.inHouse = houses[houses.length - 1];
 }
 
@@ -2679,6 +3416,8 @@ function startLevel() {
   game.devilsSpawned = 0;
   game.latchedDevil = null;
   game.lastScore = game.score;
+  game.lastBTC = playerBTC; // snapshot AFTER shop purchases - level recap shows what the level itself earned
+  game.tookHitThisLevel = false; // flawless bonus is per-level, not per-run
 
   // Set biome for this level
   currentBiome = getBiomeForLevel(game.level);
@@ -2711,14 +3450,26 @@ function startLevel() {
       dir: 1,
       targetX: WIDTH / 2,
       stunTimer: 0,
+      hintTimer: 0,
       hitFlash: 0,
       phaseTwo: false, // below 50% hp
       deathTimer: 0,
-      shakeTimer: 0
+      shakeTimer: 0,
+      pendingSlamTimer: 0,
+      swoopWindup: 0,      // charge telegraph: boss flashes + marker before diving
+      swoopPhase: null,    // 'down' | 'up' - dive to the ground and back
+      swoopHit: false,     // contact damage applies once per dive
+      rainDrops: 0,        // game-time rain queue (never fires during pause)
+      rainTimer: 0,
+      lastAttack: null     // no same attack twice in a row
     };
     // Boss levels get extra time and extra wet farts
     game.levelTimer += 15;
     wetFartCharges = MAX_WET_FARTS;
+    // The boss is the star of his own fight: calm the regular chaos so the
+    // player can read boss attacks (cfg is a fresh object - safe to tweak)
+    cfg.bombChance *= 0.5;
+    cfg.devilCount = Math.ceil(cfg.devilCount * 0.6);
   }
 
   // Power-ups reset
@@ -2726,14 +3477,17 @@ function startLevel() {
   // Don't clear activePowerUps - let them carry over briefly
 
   // Calculate devil spawn schedule - start early, come in waves!
+  // Boss levels run 15s longer, so schedule across the REAL level time
+  // (otherwise the first half of a boss fight has no regular enemies at all)
+  const scheduleTime = cfg.duration + (bossKey ? 15 : 0);
   game.devilSchedule = [];
   if (cfg.devilCount > 0) {
-    const availableTime = cfg.duration - 3; // start after just 3 seconds
+    const availableTime = scheduleTime - 3; // start after just 3 seconds
     const interval = availableTime / (cfg.devilCount + 1);
     for (let i = 1; i <= cfg.devilCount; i++) {
       // Add some randomness so devils don't come perfectly evenly
       const jitter = (Math.random() - 0.5) * interval * 0.4;
-      const spawnAt = cfg.duration - (3 + interval * i) + jitter;
+      const spawnAt = scheduleTime - (3 + interval * i) + jitter;
       game.devilSchedule.push(Math.max(1, spawnAt));
     }
     game.devilSchedule.sort((a, b) => b - a); // sort descending (highest time first)
@@ -2742,13 +3496,15 @@ function startLevel() {
   // Calculate butcher spawn schedule - butchers appear from level 2+
   game.butcherSchedule = [];
   if (game.level >= 2) {
-    const butcherCount = Math.max(0, Math.floor(game.level / 2)); // 1 at level 2-3, 2 at level 4-5, etc.
+    // 1 at level 2-3, 2 at level 4-5, etc.; halved on boss levels (focus on the boss)
+    let butcherCount = Math.max(0, Math.floor(game.level / 2));
+    if (bossKey) butcherCount = Math.ceil(butcherCount / 2);
     if (butcherCount > 0) {
-      const availableTime = cfg.duration - 8;
+      const availableTime = scheduleTime - 8;
       const interval = availableTime / (butcherCount + 1);
       for (let i = 1; i <= butcherCount; i++) {
         const jitter = (Math.random() - 0.5) * interval * 0.3;
-        const spawnAt = cfg.duration - (8 + interval * i) + jitter;
+        const spawnAt = scheduleTime - (8 + interval * i) + jitter;
         game.butcherSchedule.push(Math.max(2, spawnAt));
       }
       game.butcherSchedule.sort((a, b) => b - a);
@@ -2757,10 +3513,9 @@ function startLevel() {
 
   // Reset fart state
   fartCharges = MAX_FARTS; // refill farts each level
-  // Reset per-level power-ups (shield persists)
-  scoreMultiplier = 1;
-  turboFart = false;
-  megaPoop = false;
+  // NOTE: scoreMultiplier/turboFart/megaPoop are NOT reset here - they are bought
+  // in the shop right before startLevel() and must last for the whole next level.
+  // They are cleared at the END of a level instead (levelTimer <= 0 block).
   fartClouds.length = 0;
   chokingDevils.length = 0;
   fartCooldown = 0;
@@ -2814,9 +3569,9 @@ function startLevel() {
   }
   // materials persist between levels (NOT reset here)
   piggyDamageTimer = 0;
+  invulnTimer = 0;
   scoreBounceFactor = 0;
   houses.length = 0;
-  houseSpawnTimer = 8;
   player.inHouse = null;
   player.x = WIDTH / 2;
   player.y = player.groundY;
@@ -2828,11 +3583,131 @@ function startLevel() {
   isPaused = false;
   showHelp = false;
   game.screen = 'playing';
+  stopIntroMusic(); // title/shop ambient theme must not bleed into gameplay
   startMusic();
+}
+
+// Reset everything that belongs to a single run - used by BOTH start paths
+// (SPACE on title and click/tap on title) so they behave identically.
+function resetRun() {
+  game.score = 0;
+  game.level = 1;
+  game.cracks = 0;
+  game.maxCracks = 3;
+  game.tookHitThisLevel = false;
+  materials = { straw: 0, logs: 0, bricks: 0 };
+  playerBTC = 0;
+  btcBanked = 0;
+  currentRunId = Date.now();
+  victoryFlawless = false;
+  scoreMultiplier = 1;
+  hasShield = false;
+  turboFart = false;
+  megaPoop = false;
+  wetFartCharges = 5;
+  wetFartProjectiles.length = 0;
+  wetFartInflateTimer = 0;
+  resurrectionCount = 0;
+  invulnTimer = 0;
+  Object.keys(introducedEnemies).forEach(function(k) { delete introducedEnemies[k]; });
+  enemyIntroActive = null;
+}
+
+// Leaving the intro cutscene for the title screen - ALL exits (ESC, the
+// "Preskoči sve" button, or watching it to the end) go through here so the
+// "story already seen" flag can never be missed. Returning players start on
+// the title screen; the "📖 Priča" button there replays the cutscene.
+function finishIntro() {
+  stopIntroMusic();
+  game.screen = 'title';
+  introScene = 0;
+  try { localStorage.setItem('kasicaIntroSeen', '1'); } catch (err) { /* private mode */ }
+}
+
+// Replay the story from the title screen ("📖 Priča" button)
+function replayIntro() {
+  introScene = 0;
+  introTimer = 0;
+  introTextOpacity = 0;
+  introFadeOut = 0;
+  game.screen = 'intro';
+  forceRestartIntroMusic();
+}
+
+// Pause helper: keeps music in sync with pause state
+function setPaused(v) {
+  if (isPaused === v) return;
+  isPaused = v;
+  if (game.screen === 'playing') {
+    if (v) stopMusic(); else startMusic();
+  }
+}
+
+// Used by keyboard (P), and the on-screen pause button.
+// If the help overlay is open, unpausing must also close it - otherwise the
+// game keeps running "blind" behind an opaque overlay.
+function togglePause() {
+  if (game.screen !== 'playing') return;
+  if (showHelp) {
+    showHelp = false;
+    setPaused(false);
+  } else {
+    setPaused(!isPaused);
+  }
+}
+
+// Used by the on-screen ? button (mobile has no ESC key): toggles the
+// help/rules overlay during gameplay and in the shop.
+function toggleHelpOverlay() {
+  if (game.screen === 'playing') {
+    if (showHelp) {
+      showHelp = false;
+      setPaused(false);
+    } else {
+      showHelp = true;
+      setPaused(true);
+    }
+  } else if (game.screen === 'shop') {
+    showHelp = !showHelp;
+  }
+}
+
+// Shop entry helper: clears stale click rects from the previous shop visit and
+// records entry time, so the same click/tap/keypress that opened the shop can
+// never immediately buy an item or hit the skip button.
+let shopEnteredAt = 0;
+// Gold flash on a card just bought (digit key or click/tap)
+let shopFlashItem = null;
+let shopFlashUntil = 0;
+// Red flash on a card whose purchase failed (not enough BTC / already active)
+let shopErrorItem = null;
+let shopErrorUntil = 0;
+// Mobile two-tap purchase: first tap selects the card, second tap buys it -
+// so a curious tap "just to read the description" never spends BTC
+let shopSelectedItem = null;
+function enterShop() {
+  shopSkipRect = null;
+  SHOP_ITEMS.forEach(function(it) { it._rect = null; });
+  shopEnteredAt = performance.now();
+  shopSelectedItem = null;
+  shopFlashItem = null;
+  shopErrorItem = null;
+  game.screen = 'shop';
 }
 
 // --- Input ---
 const keys = {};
+// WASD aliases: left hand plays exactly like the arrows (A/D move, W jump, S slam)
+const KEY_ALIAS = {
+  w: 'ArrowUp', W: 'ArrowUp',
+  a: 'ArrowLeft', A: 'ArrowLeft',
+  s: 'ArrowDown', S: 'ArrowDown',
+  d: 'ArrowRight', D: 'ArrowRight'
+};
+// Jump buffer: a jump pressed just before landing executes on touchdown
+let jumpBufferTimer = 0;
+// Throttle for "no charges" feedback popups
+let lastEmptyPopupAt = 0;
 window.addEventListener('keydown', (e) => {
   // SECRET CHEAT: CMD+P (Mac) or Ctrl+P (Win/Linux) = Continue from where you died
   if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
@@ -2850,7 +3725,6 @@ window.addEventListener('keydown', (e) => {
       game.latchedDevil = null;
       player.inHouse = null;
       houses.length = 0;
-      houseSpawnTimer = 8;
       piggyDamageTimer = 0;
       objects.length = 0;
       ejectedCoins.length = 0;
@@ -2860,6 +3734,7 @@ window.addEventListener('keydown', (e) => {
       fartClouds.length = 0;
       chokingDevils.length = 0;
       gameOverDevils.length = 0;
+      bossProjectiles.length = 0; // fireballs from the previous life must not greet the respawn
       wetFartProjectiles.length = 0;
       wetFartInflateTimer = 0;
       resurrectionState = null;
@@ -2874,28 +3749,79 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Don't process game keys during name input or shop
-  if (game.screen === 'nameInput' || game.screen === 'shop') return;
+  // Don't process game keys during name input
+  if (game.screen === 'nameInput') return;
+
+  // M = master mute toggle, works on every screen
+  if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+    toggleMute();
+    if (game.screen === 'playing') {
+      spawnScorePopup(player.x, player.y - 40, isMuted ? '\u{1F507} Zvuk isključen' : '\u{1F50A} Zvuk uključen', '#ffffff');
+    }
+    return;
+  }
+
+  // Shop keyboard controls: SPACE/Enter = next level, 1-6 = buy item, ESC = help
+  if (game.screen === 'shop') {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      // Ignore the same key press / key repeat that opened the shop
+      if (performance.now() - shopEnteredAt < 300) return;
+      if (showHelp) { showHelp = false; return; }
+      game.level++;
+      startLevel();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      showHelp = !showHelp;
+    } else if (e.key >= '1' && e.key <= '6' && !e.repeat && !showHelp) {
+      // Digit keys buy the matching card - the shop is fully keyboard playable
+      if (performance.now() - shopEnteredAt < 300) return;
+      const shopItem = SHOP_ITEMS[parseInt(e.key, 10) - 1];
+      if (shopItem && playerBTC >= shopItem.cost && !isShopItemActive(shopItem)) {
+        playerBTC -= shopItem.cost;
+        shopItem.effect();
+        shopBuySuccess(shopItem);
+      } else if (shopItem) {
+        // Not enough BTC or already active - clear "no sale" feedback
+        shopBuyFail(shopItem);
+      }
+    }
+    return;
+  }
+
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
     e.preventDefault();
   }
 
-  // Help overlay - ESC
+  // Normalize WASD to arrow keys for all gameplay checks below
+  const gk = KEY_ALIAS[e.key] || e.key;
+
+  // ESC on the intro cutscene skips straight to the title
+  if (e.key === 'Escape' && game.screen === 'intro') {
+    finishIntro();
+    e.preventDefault();
+    return;
+  }
+
+  // Help overlay - ESC. From a plain pause ESC resumes (as the overlay says);
+  // otherwise it opens the help (and closes it on the second press).
   if (e.key === 'Escape' && game.screen === 'playing') {
     if (showHelp) {
       showHelp = false;
-      isPaused = false;
+      setPaused(false);
+    } else if (isPaused) {
+      setPaused(false);
     } else {
       showHelp = true;
-      isPaused = true;
+      setPaused(true);
     }
     e.preventDefault();
     return;
   }
 
-  // Pause toggle - P only
+  // Pause toggle - P only (closes help overlay too, see togglePause)
   if ((e.key === 'p' || e.key === 'P') && game.screen === 'playing') {
-    isPaused = !isPaused;
+    togglePause();
     e.preventDefault();
     return;
   }
@@ -2906,6 +3832,7 @@ window.addEventListener('keydown', (e) => {
   // Wet Fart - Q (left) / E (right)
   if ((e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E') && game.screen === 'playing') {
     e.preventDefault();
+    if (e.repeat) return; // holding the key must not auto-drain charges
     if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
       wetFartCharges--;
       wetFartPendingDir = (e.key === 'q' || e.key === 'Q') ? -1 : 1;
@@ -2914,27 +3841,38 @@ window.addEventListener('keydown', (e) => {
       if (speechBubbles.length < 3) {
         speechBubbles.push({ x: player.x, y: player.y - 80, text: 'Auu, usrah se! 💦', timer: 2.0, maxTimer: 2.0 });
       }
+    } else if (wetFartCharges <= 0 && performance.now() - lastEmptyPopupAt > 800) {
+      // Feedback instead of a silent dead key
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema vlažnih prdeža! Kupi u shopu \u{1F4B0}', '#ff4444');
     }
     return;
   }
 
-  keys[e.key] = true;
+  keys[gk] = true;
 
-  // Jump (only when grounded and no latched devil)
-  if (e.key === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
-    player.vy = player.jumpForce;
-    player.grounded = false;
+  // Jump (only when grounded and no latched devil). A press just before
+  // landing is buffered for ~0.12s and fires on touchdown.
+  if (gk === 'ArrowUp' && !e.repeat && game.screen === 'playing' && !game.latchedDevil) {
+    if (player.grounded) {
+      player.vy = player.jumpForce;
+      playJumpSound();
+      player.grounded = false;
+    } else {
+      jumpBufferTimer = 0.12;
+    }
   }
 
-  // Shake detection when devil is latched
+  // Shake detection when devil is latched (!e.repeat: OS auto-repeat of a held
+  // key must not double the shake progress of the other, tapped key)
   if (game.latchedDevil && game.screen === 'playing') {
-    if (e.key === 'ArrowUp' && lastShakeKey !== 'up') {
+    if (gk === 'ArrowUp' && !e.repeat && lastShakeKey !== 'up') {
       game.latchedDevil.shakeProgress++;
       lastShakeKey = 'up';
       shakeVisualOffset = -5;
       shakeVisualTimer = 0.08;
       playShakeSound();
-    } else if (e.key === 'ArrowDown' && lastShakeKey !== 'down') {
+    } else if (gk === 'ArrowDown' && !e.repeat && lastShakeKey !== 'down') {
       game.latchedDevil.shakeProgress++;
       lastShakeKey = 'down';
       shakeVisualOffset = 5;
@@ -2944,7 +3882,7 @@ window.addEventListener('keydown', (e) => {
   }
 
   // SUMMON HOUSE from collected materials with K
-  if ((e.key === 'k' || e.key === 'K') && game.screen === 'playing' && houses.length === 0) {
+  if ((e.key === 'k' || e.key === 'K') && !e.repeat && game.screen === 'playing' && houses.length === 0) {
     // Pick best house player can afford from materials
     if (materials.bricks >= 10) {
       buildHouse('brick');
@@ -2961,6 +3899,16 @@ window.addEventListener('keydown', (e) => {
 
   // Fart mechanic - SPACE during gameplay (not while in house)
   if (e.key === ' ' && game.screen === 'playing') {
+    if (e.repeat) {
+      // Holding SPACE must not drain the limited fart charges by itself
+      e.preventDefault();
+      return;
+    }
+    if (fartCharges <= 0 && !player.inHouse && performance.now() - lastEmptyPopupAt > 800) {
+      // Feedback instead of a silent dead key
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema prdeža! Jedi \u{1F33D}', '#ff4444');
+    }
     if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5; // half second cooldown
@@ -2990,16 +3938,20 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === ' ') {
     if (game.screen === 'intro') {
-      // First key press: just unlock audio and start music
+      // First key press: just unlock audio and start music.
+      // The document-level keydown listener unlocks audio BEFORE this handler
+      // runs, so also treat a just-happened unlock (<150ms) as "this press
+      // only unlocked audio" and don't advance the scene.
       if (!audioUnlocked) {
         unlockAudio();
         forceRestartIntroMusic();
         return;
       }
+      if (performance.now() - audioUnlockedAt < 150) {
+        return; // unlockAudio() already started the intro music
+      }
       if (introScene >= 5) {
-        stopIntroMusic();
-        game.screen = 'title';
-        introScene = 0;
+        finishIntro();
       } else {
         introScene++;
         introTimer = 0;
@@ -3011,23 +3963,18 @@ window.addEventListener('keydown', (e) => {
     }
     if (game.screen === 'title') {
       playOink();
-      game.score = 0;
-      game.level = 1;
-      game.cracks = 0;
-      game.maxCracks = 3;
-      materials = { straw: 0, logs: 0, bricks: 0 };
-      playerBTC = 0;
-      scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
-      wetFartCharges = 5; wetFartProjectiles.length = 0; wetFartInflateTimer = 0;
+      resetRun();
       startLevel();
     } else if (game.screen === 'gameOver') {
+      // Don't let a nervous SPACE mash skip the resurrection sequence
+      if (resurrectionState !== 'done') return;
       game.score = 0;
       game.level = 1;
       game.screen = 'title';
       Object.keys(introducedEnemies).forEach(k => delete introducedEnemies[k]);
       enemyIntroActive = null;
     } else if (game.screen === 'levelComplete') {
-      game.screen = 'shop';
+      enterShop();
     } else if (game.screen === 'victory') {
       stopVictoryMusic();
       game.screen = 'title';
@@ -3036,20 +3983,37 @@ window.addEventListener('keydown', (e) => {
 });
 
 // Click/touch on canvas also starts/restarts game (and unlocks audio!)
-canvas.addEventListener('click', () => {
+canvas.addEventListener('click', (e) => {
   if (game.screen === 'nameInput') return;
   const wasUnlocked = audioUnlocked;
   unlockAudio();
+  // Mute icon (drawn in the playing HUD) is clickable
+  if (muteIconRect && game.screen === 'playing') {
+    const mrect = canvas.getBoundingClientRect();
+    const mcx = (e.clientX - mrect.left) * WIDTH / mrect.width;
+    const mcy = (e.clientY - mrect.top) * HEIGHT / mrect.height;
+    if (mcx >= muteIconRect.x && mcx <= muteIconRect.x + muteIconRect.w &&
+        mcy >= muteIconRect.y && mcy <= muteIconRect.y + muteIconRect.h) {
+      toggleMute();
+      return;
+    }
+  }
   if (game.screen === 'intro') {
+    // "Preskoči sve" corner button skips the whole cutscene with one tap
+    const cr = canvas.getBoundingClientRect();
+    const ccx = (e.clientX - cr.left) * WIDTH / cr.width;
+    const ccy = (e.clientY - cr.top) * HEIGHT / cr.height;
+    if (ccx < 280 && ccy > HEIGHT - 50) {
+      finishIntro();
+      return;
+    }
     // First click on any scene: just unlock audio and start music, don't advance
     if (!wasUnlocked) {
       forceRestartIntroMusic();
       return;
     }
     if (introScene >= 5) {
-      stopIntroMusic();
-      game.screen = 'title';
-      introScene = 0;
+      finishIntro();
     } else {
       introScene++;
       introTimer = 0;
@@ -3060,15 +4024,16 @@ canvas.addEventListener('click', () => {
     return;
   }
   if (game.screen === 'title') {
+    // "📖 Priča" button (bottom-left) replays the intro cutscene
+    const tr = canvas.getBoundingClientRect();
+    const tcx = (e.clientX - tr.left) * WIDTH / tr.width;
+    const tcy = (e.clientY - tr.top) * HEIGHT / tr.height;
+    if (tcx >= 20 && tcx <= 175 && tcy >= HEIGHT - 58 && tcy <= HEIGHT - 16) {
+      replayIntro();
+      return;
+    }
     playOink();
-    game.score = 0;
-    game.level = 1;
-    game.cracks = 0;
-    game.maxCracks = 3;
-    materials = { straw: 0, logs: 0, bricks: 0 };
-    playerBTC = 0;
-    scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
-    resurrectionCount = 0;
+    resetRun();
     // Auto-fullscreen on mobile game start
     if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
       const el = document.documentElement;
@@ -3082,7 +4047,7 @@ canvas.addEventListener('click', () => {
     game.level = 1;
     game.screen = 'title';
   } else if (game.screen === 'levelComplete') {
-    game.screen = 'shop';
+    enterShop();
   } else if (game.screen === 'victory') {
     stopVictoryMusic();
     game.screen = 'title';
@@ -3091,6 +4056,8 @@ canvas.addEventListener('click', () => {
 
 window.addEventListener('keyup', (e) => {
   keys[e.key] = false;
+  const gk = KEY_ALIAS[e.key];
+  if (gk) keys[gk] = false;
 });
 
 // --- Mobile Touch Controls ---
@@ -3105,14 +4072,30 @@ const activeTouches = {};
 function simulateKeyDown(keyName) {
   // Don't process gameplay keys while paused
   if (isPaused) return;
-  // Simulate the same keydown event the keyboard handler uses
-  const fakeEvent = { key: keyName, preventDefault: () => {} };
+
+  // Wet fart on Q/E (mirrors the keyboard handler, incl. the in-house rule)
+  if ((keyName === 'q' || keyName === 'e') && game.screen === 'playing') {
+    if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
+      wetFartCharges--;
+      wetFartPendingDir = keyName === 'q' ? -1 : 1;
+      wetFartInflateTimer = 0.6;
+      if (speechBubbles.length < 3) {
+        speechBubbles.push({ x: player.x, y: player.y - 80, text: 'Auu, usrah se! 💦', timer: 2.0, maxTimer: 2.0 });
+      }
+    } else if (wetFartCharges <= 0 && performance.now() - lastEmptyPopupAt > 800) {
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema vlažnih prdeža! Kupi u shopu \u{1F4B0}', '#ff4444');
+    }
+    return;
+  }
+
   // Set key state
   keys[keyName] = true;
 
   // Jump (only when grounded and no latched devil) - touch controls
   if (keyName === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
     player.vy = player.jumpForce;
+    playJumpSound();
     player.grounded = false;
   }
 
@@ -3141,9 +4124,13 @@ function simulateKeyDown(keyName) {
     else spawnScorePopup(player.x, player.y - 40, 'Nema dovoljno materijala!', '#ff4444');
   }
 
-  // Handle fart on space
+  // Handle fart on space (same rules as keyboard: not while in house)
   if (keyName === ' ' && game.screen === 'playing') {
-    if (fartCharges > 0 && fartCooldown <= 0) {
+    if (fartCharges <= 0 && !player.inHouse && performance.now() - lastEmptyPopupAt > 800) {
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema prdeža! Jedi \u{1F33D}', '#ff4444');
+    }
+    if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5;
       var tfs = turboFart ? 1.5 : 1.0;
@@ -3225,7 +4212,7 @@ const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);
 const JUMP_H = 100;
 const JUMP_Y = DIR_Y + DIR_H + GAP;
 
-// SERI (poop) - above DESNO, same width as DESNO
+// KU\u0106A - above LEVO (rare action, safe at the top)
 const POOP_H = 100;
 const POOP_Y = DIR_Y - GAP - POOP_H;
 
@@ -3233,7 +4220,20 @@ const POOP_Y = DIR_Y - GAP - POOP_H;
 const FART_H = 100;
 const FART_Y = DIR_Y + DIR_H + GAP;
 
+// SERI - at the BOTTOM of the right stack (a held thumb at the old top-right
+// position covered the area where falling bombs/coins need to be judged)
+const SERI_Y = FART_Y + FART_H + GAP;
+
+// Vla\u017Eni prde\u017E - pair of half-width zones below SKOK (Q = left, E = right)
+const WF_W = Math.floor((DIR_W - 6) / 2);
+const WF_Y = JUMP_Y + JUMP_H + GAP;
+const WF_H = 100;
+
 const mobileZones = [
+  // KU\u0106A - above LEVO; builds a house from materials
+  { id: 'house', key: 'k', icon: '\uD83C\uDFE0', label: 'KU\u0106A',
+    color: 'rgba(255,150,80,',
+    x: PAD, y: POOP_Y, w: DIR_W, h: POOP_H },
   // LEVO
   { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',
     color: 'rgba(100,150,255,',
@@ -3242,10 +4242,17 @@ const mobileZones = [
   { id: 'jump',  key: 'ArrowUp',    icon: '\u25B2\u25BC', label: 'SKOK',
     color: 'rgba(255,220,50,',
     x: PAD, y: JUMP_Y, w: DIR_W, h: JUMP_H },
-  // SERI - above DESNO
+  // Vla\u017Eni prde\u017E levo/desno - below SKOK
+  { id: 'wetLeft',  key: 'q', icon: '\u25C0\uD83D\uDCA6', label: 'MOKRI',
+    color: 'rgba(80,180,255,',
+    x: PAD, y: WF_Y, w: WF_W, h: WF_H },
+  { id: 'wetRight', key: 'e', icon: '\uD83D\uDCA6\u25B6', label: 'MOKRI',
+    color: 'rgba(80,180,255,',
+    x: PAD + WF_W + 6, y: WF_Y, w: WF_W, h: WF_H },
+  // SERI - below PRDNI (bottom of the right stack)
   { id: 'poop',  key: 'Shift',       icon: '\uD83D\uDCA9', label: 'SERI',
     color: 'rgba(136,102,0,',
-    x: WIDTH - PAD - DIR_W, y: POOP_Y, w: DIR_W, h: POOP_H },
+    x: WIDTH - PAD - DIR_W, y: SERI_Y, w: DIR_W, h: POOP_H },
   // DESNO
   { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO',
     color: 'rgba(100,150,255,',
@@ -3298,12 +4305,10 @@ function activateZone(zone) {
   if (zone.id === 'jump') {
     if (game.latchedDevil) {
       // Devil/butcher latched: rapid shake (alternate up/down)
-      if (!shakeZoneHeld) {
-        shakeZoneHeld = true;
-        shakeToggle = false;
-        doShakeTick();
-        shakeRepeatTimer = setInterval(doShakeTick, 120);
-      }
+      startTouchShake();
+    } else if (game.screen === 'playing' && !player.grounded && !isPaused) {
+      // Second press while airborne = fast slam down (the ▼ half of the icon)
+      keys['ArrowDown'] = true;
     } else {
       // Normal jump
       simulateKeyDown('ArrowUp');
@@ -3315,8 +4320,31 @@ function activateZone(zone) {
   }
 }
 
+// Enter shake mode for the held SKOK zone (also called from the game loop when
+// a devil latches while the zone is ALREADY held - otherwise the held button
+// would silently do nothing and the player wouldn't know why)
+function startTouchShake() {
+  if (shakeZoneHeld) return;
+  shakeZoneHeld = true;
+  shakeToggle = false;
+  simulateKeyUp('ArrowUp');
+  simulateKeyUp('ArrowDown');
+  doShakeTick();
+  if (shakeRepeatTimer) clearInterval(shakeRepeatTimer);
+  shakeRepeatTimer = setInterval(doShakeTick, 120);
+}
+
 function doShakeTick() {
   if (!shakeZoneHeld) return;
+  if (!game.latchedDevil) {
+    // Devil shaken off while the zone is still held: stop the shake loop so it
+    // doesn't keep triggering phantom jumps
+    shakeZoneHeld = false;
+    if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+    simulateKeyUp('ArrowUp');
+    simulateKeyUp('ArrowDown');
+    return;
+  }
   const k = shakeToggle ? 'ArrowDown' : 'ArrowUp';
   const kOther = shakeToggle ? 'ArrowUp' : 'ArrowDown';
   simulateKeyUp(kOther);
@@ -3398,6 +4426,16 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
 
+  // Tap anywhere on a paused game resumes it (mobile has no P/ESC keys)
+  if (game.screen === 'playing' && isPaused) {
+    for (const touch of e.changedTouches) {
+      delete canvasTouches[touch.identifier];
+    }
+    recalcZonesFromTouches();
+    togglePause();
+    return;
+  }
+
   // Non-playing screens: tap = click to advance
   if (game.screen !== 'playing') {
     // Pass real touch coordinates into the synthetic click event
@@ -3431,23 +4469,78 @@ canvas.addEventListener('touchcancel', (e) => {
   recalcZonesFromTouches();
 }, { passive: false });
 
+// --- Stuck-input protection + auto-pause on focus loss ---
+// keyup/touchend events go to another app when the window loses focus (Alt+Tab,
+// notification, OS dialog): release everything so the pig doesn't run into a
+// wall forever, and pause so the game politely waits for the player.
+function releaseAllInputs() {
+  for (const k in keys) keys[k] = false;
+  for (const tid in canvasTouches) delete canvasTouches[tid];
+  for (const zid in activeZones) delete activeZones[zid];
+  shakeZoneHeld = false;
+  if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+}
+function onFocusLost() {
+  releaseAllInputs();
+  if (game.screen === 'playing' && !isPaused) setPaused(true);
+}
+window.addEventListener('blur', onFocusLost);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) onFocusLost();
+});
+
 // --- Draw Mobile Touch Zones on Canvas (gamepad-style buttons) ---
+// Can a house be built right now? (used for the pulsing KUĆA button + HUD hint)
+function canBuildHouse() {
+  return houses.length === 0 &&
+    (materials.bricks >= 10 || materials.logs >= 7 || materials.straw >= 5);
+}
+
 function drawMobileTouchZones() {
   if (!isMobile) return;
   const zones = getZoneRects();
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 250));
 
   for (const z of zones) {
     const isActive = !!activeZones[z.id];
 
+    // Contextual state: icon/label/color adapt to what the button can do NOW
+    let icon = z.icon, label = z.label, color = z.color;
+    let disabled = false, highlight = false;
+    if (z.id === 'jump' && game.latchedDevil) {
+      icon = '↕';
+      label = 'TRESI!';
+      color = 'rgba(255,60,60,';
+      highlight = true;
+    } else if (z.id === 'fart') {
+      label = 'PRDNI x' + fartCharges;
+      disabled = fartCharges <= 0;
+    } else if (z.id === 'wetLeft' || z.id === 'wetRight') {
+      label = 'x' + wetFartCharges;
+      disabled = wetFartCharges <= 0;
+      // During a boss fight the wet fart IS the weapon - make the button beg
+      if (!disabled && bossActive && boss && boss.state === 'fighting') {
+        highlight = true;
+        label = 'BOSS! x' + wetFartCharges;
+      }
+    } else if (z.id === 'house') {
+      const can = canBuildHouse();
+      disabled = !can;
+      highlight = can;
+      if (houses.length > 0) label = 'IMAŠ';
+    }
+
+    const dim = disabled ? 0.45 : 1.0;
+
     // Rounded button background
-    ctx.fillStyle = z.color + (isActive ? '0.35)' : '0.12)');
+    ctx.fillStyle = color + ((isActive ? 0.35 : (highlight ? 0.10 + pulse * 0.15 : 0.12)) * dim + ')');
     ctx.beginPath();
     ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
     ctx.fill();
 
-    // Button border
-    ctx.strokeStyle = z.color + (isActive ? '0.8)' : '0.3)');
-    ctx.lineWidth = 2;
+    // Button border (pulses when the button begs to be pressed)
+    ctx.strokeStyle = color + ((isActive ? 0.8 : (highlight ? 0.4 + pulse * 0.5 : 0.3)) * dim + ')');
+    ctx.lineWidth = highlight ? 3 : 2;
     ctx.beginPath();
     ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
     ctx.stroke();
@@ -3461,18 +4554,18 @@ function drawMobileTouchZones() {
     }
 
     // Icon
-    ctx.globalAlpha = isActive ? 0.9 : 0.4;
+    ctx.globalAlpha = (isActive ? 0.9 : (highlight ? 0.3 + pulse * 0.5 : 0.4)) * (disabled ? 0.5 : 1);
     ctx.font = '40px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.icon, z.x + z.w / 2, z.y + z.h * 0.4);
+    ctx.fillText(icon, z.x + z.w / 2, z.y + z.h * 0.4);
 
     // Label text below icon
     ctx.font = 'bold 14px sans-serif';
-    ctx.globalAlpha = isActive ? 0.7 : 0.25;
+    ctx.globalAlpha = (isActive ? 0.7 : (highlight ? 0.3 + pulse * 0.4 : 0.25)) * (disabled ? 0.6 : 1);
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.label, z.x + z.w / 2, z.y + z.h * 0.75);
+    ctx.fillText(label, z.x + z.w / 2, z.y + z.h * 0.75);
 
     ctx.globalAlpha = 1.0;
   }
@@ -3490,6 +4583,9 @@ function aabb(a, b) {
 
 // --- Update ---
 function triggerDamage(fromBomb) {
+  // Invulnerability frames: overlapping enemies / simultaneous hits can't
+  // drain multiple hearts in a single moment
+  if (invulnTimer > 0) return;
   if (player.inHouse && player.inHouse.hp > 0) {
     // Redirect damage to house
     player.inHouse.hp--;
@@ -3500,15 +4596,19 @@ function triggerDamage(fromBomb) {
   if (hasShield) {
     hasShield = false;
     spawnParticles(player.x, player.y, '\uD83D\uDEE1\uFE0F', 4, 150);
-    spawnScorePopup(player.x, player.y - 30, '\uD83D\uDEE1\uFE0F Blocked!', '#4488ff');
+    spawnScorePopup(player.x, player.y - 30, '\uD83D\uDEE1\uFE0F Blokirano!', '#4488ff');
     triggerScreenShake(3, 0.15);
     return;
   }
   game.cracks++;
+  game.tookHitThisLevel = true; // no flawless bonus for this level
   game.score = Math.max(0, game.score - 5);
+  coinCombo = 0; // damage breaks the pitch-combo streak
+  invulnTimer = 1.0;
   flashTimer = 0.3;
   flashColor = '#ff0000';
   piggyDamageTimer = 0.3;
+  playHurtOink(); // taking a crack used to be visually-only
   spawnScorePopup(player.x, player.y - 40, '-5', '#ff4444');
 
   if (fromBomb) {
@@ -3527,7 +4627,6 @@ function triggerDamage(fromBomb) {
     gameOverTimer = 0;
     stopMusic();
     playGameOver();
-    saveToLeaderboard();
     // Initialize laughing devils
     gameOverDevils = [];
     for (let i = 0; i < 4; i++) {
@@ -3556,6 +4655,8 @@ function triggerDamage(fromBomb) {
     }
     resurrectionTimer = 0;
     angelY = -50;
+    // Save last: even if storage misbehaves, gameOver state above is fully initialized
+    saveToLeaderboard();
   }
 }
 
@@ -3572,9 +4673,13 @@ function updateBoss(dt) {
       boss.y = 60;
       boss.state = 'fighting';
       bossActive = true;
-      triggerEnemyIntro(boss.type === 'velikiVuk' ? 'wolf' : boss.type === 'megaKasapin' ? 'butcher' : boss.type === 'kraljDjavola' ? 'devil_fast' : 'farmer');
+      boss.hintTimer = 12; // teach the counterplay for the first seconds of the fight
+      triggerEnemyIntro('boss_' + boss.type);
       spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u26A0\uFE0F BOSS: ' + boss.name + ' \u26A0\uFE0F', '#FF0000');
       triggerScreenShake(10, 0.5);
+      playBossRoar();
+      // Re-seed the music loop so the boss variant kicks in on the next phrase
+      if (musicPlaying) { stopMusic(); startMusic(); }
     }
     return;
   }
@@ -3587,22 +4692,49 @@ function updateBoss(dt) {
       bossDefeatedThisLevel = true;
       bossActive = false;
       playerBTC += boss.reward;
-      spawnScorePopup(boss.x, boss.y, '+' + boss.reward + ' \u20BF BOSS DEFEATED!', '#FFD700');
+      spawnScorePopup(boss.x, boss.y, '+' + boss.reward + ' \u20BF BOSS POBE\u0110EN!', '#FFD700');
       for (let i = 0; i < 20; i++) {
         spawnParticles(boss.x + (Math.random()-0.5)*80, boss.y + (Math.random()-0.5)*80, '\u{1F4A5}', 1, 200);
       }
       triggerScreenShake(15, 0.8);
+      // Victory spoils: patch one crack (a strategic breather before harder
+      // levels) and rain gold from where the boss fell - a reward you FEEL
+      if (game.cracks > 0) {
+        game.cracks--;
+        spawnScorePopup(WIDTH / 2, HEIGHT / 2 - 40, '\u{1F496} Kasica zakrpljena! -1 pukotina', '#FF88CC');
+      }
+      const goldType = COIN_TYPES[2];
+      const dropX = boss.x;
+      for (let i = 0; i < 12; i++) {
+        objects.push({
+          type: 'coin', coinType: goldType,
+          x: Math.max(30, Math.min(WIDTH - 30, dropX + (Math.random() - 0.5) * 360)),
+          y: -20 - i * 30,
+          width: 40, height: 40,
+          speed: 260 + Math.random() * 80,
+          emoji: null, value: goldType.value
+        });
+      }
+      // Final boss down -> head straight into the victory scene (short
+      // gold-lap instead of waiting out a long leftover timer)
+      if (boss.type === 'kraljKlanice') {
+        game.levelTimer = Math.min(game.levelTimer, 6);
+        spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u{1F3C6} POBEDA! \u{1F3C6}', '#FFD700');
+      }
       boss = null;
     }
     return;
   }
 
   // Phase two at 50% hp
+  if (boss.hintTimer > 0) boss.hintTimer -= dt;
+
   if (!boss.phaseTwo && boss.hp <= boss.maxHp / 2) {
     boss.phaseTwo = true;
     boss.speed *= 1.4;
-    spawnScorePopup(boss.x, boss.y - 40, 'PHASE 2! \u{1F525}', '#FF4400');
+    spawnScorePopup(boss.x, boss.y - 40, 'FAZA 2! \u{1F525}', '#FF4400');
     triggerScreenShake(8, 0.4);
+    playBossPhaseTwo();
   }
 
   // Frozen check
@@ -3611,26 +4743,119 @@ function updateBoss(dt) {
     return;
   }
 
-  // Movement AI
-  const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
-  if (Math.abs(boss.x - boss.targetX) > 10) {
-    boss.dir = boss.targetX > boss.x ? 1 : -1;
-    boss.x += moveSpeed * boss.dir * dt;
-  } else {
-    // Pick new target
-    if (Math.random() < 0.02) {
-      boss.targetX = 60 + Math.random() * (WIDTH - 120);
+  // Delayed attack effects (in-update timers instead of setTimeout: they pause
+  // with the game and can never fire during gameOver or after the boss dies)
+  if (boss.pendingSlamTimer > 0) {
+    boss.pendingSlamTimer -= dt;
+    if (boss.pendingSlamTimer <= 0) {
+      boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
+      triggerScreenShake(12, 0.5);
+      spawnParticles(boss.x, HEIGHT - 60, '\u{1F4A5}', 5, 120);
+      // Damage only if player is near, ON THE GROUND and visible -
+      // jumping over the slam is the intended counterplay
+      if (player.grounded && !hasPowerUp('invisibility') && Math.abs(boss.x - player.x) < 80) triggerDamage(false);
+    }
+  }
+  // Game-time rain queue (replaces setTimeout: pauses with the game,
+  // dies with the boss, never ambushes the player on unpause)
+  if (boss.rainDrops > 0) {
+    boss.rainTimer -= dt;
+    if (boss.rainTimer <= 0) {
+      boss.rainTimer = 0.2;
+      boss.rainDrops--;
+      bossProjectiles.push({
+        x: Math.random() * WIDTH, y: -20,
+        vx: 0, vy: 200 + Math.random() * 100,
+        life: 3, emoji: '\u{1F525}', size: 20
+      });
+    }
+  }
+
+  // Swoop charge: telegraphed dive to the ground through the player's
+  // position, then climb back up. Gives the fight vertical rhythm and a
+  // window where poop (SHIFT) becomes a real anti-boss weapon.
+  if (boss.swoopWindup > 0) {
+    boss.swoopWindup -= dt;
+    boss.targetX = player.x; // locks on while winding up - dodge AFTER the dive starts
+    if (boss.swoopWindup <= 0) {
+      boss.swoopPhase = 'down';
+      boss.swoopHit = false;
+    }
+  }
+  if (boss.swoopPhase) {
+    const diveSpeed = boss.phaseTwo ? 330 : 270;
+    if (Math.abs(boss.x - boss.targetX) > 8) {
+      boss.dir = boss.targetX > boss.x ? 1 : -1;
+      boss.x += boss.speed * 1.6 * boss.dir * dt;
+    }
+    if (boss.swoopPhase === 'down') {
+      boss.y += diveSpeed * dt;
+      if (boss.y >= HEIGHT - 100) {
+        boss.y = HEIGHT - 100;
+        boss.swoopPhase = 'up';
+        triggerScreenShake(6, 0.3);
+        spawnParticles(boss.x, HEIGHT - 50, '\u{1F4A8}', 5, 100);
+      }
+    } else {
+      boss.y -= diveSpeed * 0.75 * dt;
+      if (boss.y <= 60) {
+        boss.y = 60;
+        boss.swoopPhase = null;
+      }
+    }
+    // Contact damage: once per dive, jumping away is the counterplay
+    if (!boss.swoopHit && !hasPowerUp('invisibility') &&
+        Math.abs(boss.x - player.x) < boss.size * 0.4 &&
+        Math.abs(boss.y - player.y) < boss.size * 0.4) {
+      boss.swoopHit = true;
+      triggerDamage(false);
     }
   }
   boss.x = Math.max(boss.size / 2, Math.min(WIDTH - boss.size / 2, boss.x));
 
-  // Attack timer
-  boss.attackTimer -= dt;
-  if (boss.attackTimer <= 0) {
-    // Choose random attack
-    const attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
-    executeBossAttack(boss, attack);
-    boss.attackTimer = boss.phaseTwo ? 2 + Math.random() * 2 : 3 + Math.random() * 2.5;
+  if (!boss.swoopPhase && boss.swoopWindup <= 0) {
+    // Movement AI (hover) - only while not diving
+    const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
+    if (Math.abs(boss.x - boss.targetX) > 10) {
+      boss.dir = boss.targetX > boss.x ? 1 : -1;
+      boss.x += moveSpeed * boss.dir * dt;
+    } else {
+      // Pick new target
+      if (Math.random() < 0.02) {
+        boss.targetX = 60 + Math.random() * (WIDTH - 120);
+      }
+    }
+    boss.x = Math.max(boss.size / 2, Math.min(WIDTH - boss.size / 2, boss.x));
+
+    // Attack timer
+    boss.attackTimer -= dt;
+    if (boss.attackTimer <= 0) {
+      // Random attack, but never the same one twice in a row - kills both
+      // teleport-chains and boring double-rains
+      let attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
+      if (boss.attacks.length > 1 && attack === boss.lastAttack) {
+        const others = boss.attacks.filter(a => a !== boss.lastAttack);
+        attack = others[Math.floor(Math.random() * others.length)];
+      }
+      boss.lastAttack = attack;
+      executeBossAttack(boss, attack);
+      boss.attackTimer = boss.phaseTwo ? 2 + Math.random() * 2 : 3 + Math.random() * 2.5;
+    }
+  }
+
+  // A low-flying boss breathes the stink: poop damages him while he is near
+  // the ground (the swoop window), so SHIFT is no longer useless against bosses
+  if (boss.y > HEIGHT - 220) {
+    for (let i = poops.length - 1; i >= 0; i--) {
+      const poop = poops[i];
+      if (!poop.isTrap && Math.abs(poop.x - boss.x) < boss.size * 0.8) {
+        damageBoss(2);
+        spawnParticles(poop.x, poop.y - 25, '\u{1F922}', 4, 90);
+        spawnScorePopup(boss.x, boss.y - 30, '\u{1F922} SMRDI!', '#88CC44');
+        poops.splice(i, 1);
+        break;
+      }
+    }
   }
 
   // Boss takes damage from fart clouds
@@ -3641,19 +4866,20 @@ function updateBoss(dt) {
       fartClouds.splice(i, 1);
     }
   }
-  // Boss takes damage from wet fart projectiles
+  // Boss takes damage from wet fart projectiles. New lobbed shots (ballistic)
+  // must actually reach the boss's body; old horizontal shots fired outside
+  // the fight keep the rising stink-column behavior as a fallback.
   for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
     const wf = wetFartProjectiles[i];
-    if (Math.abs(wf.x - boss.x) < boss.size && Math.abs(wf.y - boss.y) < boss.size) {
+    const hitsBoss = wf.ballistic
+      ? Math.hypot(wf.x - boss.x, wf.y - boss.y) < boss.size * 0.75
+      : Math.abs(wf.x - boss.x) < boss.size * 0.8;
+    if (hitsBoss) {
       damageBoss(3);
+      spawnScorePopup(boss.x, boss.y - boss.size * 0.5, '\u{1F4A6} POGODAK!', '#AFFF6E');
+      spawnParticles(boss.x, boss.y + boss.size / 2, '\u{1F4A6}', 4, 100);
+      spawnParticles(wf.x, wf.y - 30, '\u{1F4A8}', 3, 120);
       wetFartProjectiles.splice(i, 1);
-    }
-  }
-  // Boss takes damage from poops (if it's near ground)
-  for (const poop of poops) {
-    if (boss.y > HEIGHT - 120 && Math.abs(poop.x - boss.x) < boss.size) {
-      damageBoss(1);
-      poop.life = 0;
     }
   }
 }
@@ -3663,36 +4889,41 @@ function damageBoss(amount) {
   boss.hp -= amount;
   boss.hitFlash = 0.2;
   boss.shakeTimer = 0.15;
+  playBossHit();
   spawnParticles(boss.x, boss.y, '\u{1F4A5}', 2, 80);
   if (boss.hp <= 0) {
     boss.hp = 0;
     boss.state = 'dying';
     boss.deathTimer = 0;
+    playBossDeath();
   }
 }
 
 function executeBossAttack(boss, attack) {
   const px = player.x;
   switch (attack) {
-    case 'charge': // Rush toward player
+    case 'charge': // Telegraphed dive through the player's position
       boss.targetX = px;
-      boss.speed *= 2;
-      setTimeout(() => { if (boss) boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : boss.speed / 2; }, 1500);
+      boss.swoopWindup = 0.7; // wind-up: boss flashes + ground marker, then dives
+      spawnScorePopup(boss.x, boss.y - 30, '⚡ OBRUŠAVA SE!', '#FFAA00'); // telegraph
       break;
-    case 'howl': // Summon 2 wolves
+    case 'howl': // Summon 2 wolves - one from each side so they never stack
       for (let i = 0; i < 2; i++) {
-        const fromLeft = Math.random() > 0.5;
+        const fromLeft = i === 0;
+        const wt = GROUND_ENEMY_TYPES.wolf;
         groundEnemies.push({
-          type: 'wolf', emoji: '\u{1F43A}',
+          type: 'wolf', emoji: wt.emoji,
           x: fromLeft ? -30 : WIDTH + 30,
-          y: HEIGHT - 55, width: 50, height: 50,
+          y: HEIGHT - 45, width: wt.size, height: wt.size,
           speed: 80, dir: fromLeft ? 1 : -1,
-          ai: 'straight', pauseTimer: 0, frozen: 0, nameTimer: 0
+          ai: 'straight', pauseTimer: 0, frozen: 0, animTimer: 0, nameTimer: 0
         });
       }
       spawnScorePopup(boss.x, boss.y - 30, 'AUUUUU! \u{1F43A}', '#888');
+      playWolfHowl(); // the popup literally spells out a sound - now it exists
       break;
-    case 'summon': // Summon minions
+    case 'summon': // Summon minions (same stats as a regular fast devil -
+      // shakeRequired 6 like spawnDevil, not the silent default of 8)
       for (let i = 0; i < (boss.phaseTwo ? 3 : 2); i++) {
         objects.push({
           type: 'devil', devilType: 'fast',
@@ -3700,11 +4931,19 @@ function executeBossAttack(boss, attack) {
           y: boss.y + 20,
           width: 35, height: 35,
           speed: 200, value: 0,
-          emoji: '\u{1F608}'
+          emoji: '\u{1F608}',
+          latched: false, hammerTimer: 0, shakeProgress: 0,
+          shakeRequired: 6, hammerTimeout: 4, hammerAnimTimer: 0,
+          stealTimer: 0,
+          zigzagSpeed: 80 + Math.random() * 120,
+          zigzagFreq: 1.5 + Math.random() * 3,
+          zigzagPhase: Math.random() * Math.PI * 2,
+          zigzagTime: 0, nameTimer: 0
         });
       }
       break;
     case 'knives': // Throw knives in spread
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F52A} NOŽEVI!', '#CCCCCC'); // telegraph
       const count = boss.phaseTwo ? 5 : 3;
       for (let i = 0; i < count; i++) {
         const angle = -Math.PI / 2 + (i - (count-1)/2) * 0.3;
@@ -3719,14 +4958,9 @@ function executeBossAttack(boss, attack) {
     case 'slam': // Jump to player position
       boss.targetX = px;
       boss.speed = 400;
-      setTimeout(() => {
-        if (boss) {
-          boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
-          triggerScreenShake(12, 0.5);
-          // Damage if player is near
-          if (Math.abs(boss.x - player.x) < 80) triggerDamage(false);
-        }
-      }, 800);
+      // Impact handled in updateBoss (never fires during pause/gameOver or after boss death)
+      boss.pendingSlamTimer = 0.8;
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F3AF} SKOČI!', '#FF4444'); // telegraph: jump over it
       break;
     case 'fireball': // Fire projectile at player
       const dx = px - boss.x;
@@ -3760,21 +4994,13 @@ function executeBossAttack(boss, attack) {
       // Immediate follow-up attack
       boss.attackTimer = 0.5;
       break;
-    case 'rain': // Rain of fire from sky
-      for (let i = 0; i < (boss.phaseTwo ? 8 : 5); i++) {
-        setTimeout(() => {
-          if (boss && boss.state === 'fighting') {
-            bossProjectiles.push({
-              x: Math.random() * WIDTH,
-              y: -20,
-              vx: 0, vy: 200 + Math.random() * 100,
-              life: 3, emoji: '\u{1F525}', size: 20
-            });
-          }
-        }, i * 200);
-      }
+    case 'rain': // Rain of fire from sky - queued in game time (see updateBoss)
+      boss.rainDrops = boss.phaseTwo ? 8 : 5;
+      boss.rainTimer = 0.5; // short telegraph gap before the first drop
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F525} KIŠA VATRE!', '#FF4400');
       break;
     case 'pitchfork': // Throw pitchfork
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F531} VILE!', '#DDAA55'); // telegraph
       bossProjectiles.push({
         x: boss.x, y: boss.y + boss.size / 2,
         vx: (px - boss.x) * 0.8,
@@ -3796,7 +5022,12 @@ function executeBossAttack(boss, attack) {
 
 function update(dt) {
   // nameInput and shop screens don't need updates
-  if (game.screen === 'nameInput' || game.screen === 'shop') return;
+  if (game.screen === 'shop') {
+    // Quiet "store" pad (the tutorial theme) instead of dead silence
+    if (audioUnlocked) playIntroMusic(5);
+    return;
+  }
+  if (game.screen === 'nameInput') return;
 
   // Always update clouds
   updateClouds(dt);
@@ -3824,6 +5055,9 @@ function update(dt) {
 
   // Update title screen background coins
   if (game.screen === 'title') {
+    // The happy farm theme loops on the title - no more dead silence after
+    // the rich intro soundtrack
+    if (audioUnlocked) playIntroMusic(0);
     titleCoinTimer += dt;
     if (titleCoinTimer >= 0.5) {
       titleCoinTimer -= 0.5;
@@ -3886,10 +5120,10 @@ function update(dt) {
       }
     }
 
-    // Replay music every 5 seconds
+    // Loop the melody on its exact musical length (4.05s) - no dead air
     victoryIntruderTimer += dt;
-    if (victoryIntruderTimer > 5) {
-      victoryIntruderTimer = 0;
+    if (victoryIntruderTimer >= VICTORY_MELODY_DUR) {
+      victoryIntruderTimer -= VICTORY_MELODY_DUR;
       playVictoryMusic();
     }
     return;
@@ -3905,6 +5139,7 @@ function update(dt) {
       if (d.laughTimer <= 0 && !d.fleeing) {
         d.laughing = true;
         d.laughTimer = 1 + Math.random() * 2;
+        playDevilLaugh(); // "HA HA HA!" was text-only; throttled inside
       }
       if (d.laughing && d.laughTimer > 0.5) d.laughing = false;
       if (d.fleeing) {
@@ -3956,13 +5191,28 @@ function update(dt) {
         game.cracks = 0;
         resurrectionCount++;
         game.screen = 'playing';
+        player.x = WIDTH / 2;
         player.y = player.groundY;
         player.vy = 0;
         player.grounded = true;
         game.latchedDevil = null;
         player.inHouse = null;
         houses.length = 0;
-        houseSpawnTimer = 8;
+        // Clear the battlefield so the paid resurrection isn't instantly punished
+        // by leftover bombs/projectiles (same cleanup as the Ctrl+P cheat)
+        objects.length = 0;
+        ejectedCoins.length = 0;
+        groundEnemies.length = 0;
+        bossProjectiles.length = 0;
+        lightningBolts.length = 0;
+        lightningWarning = null;
+        fartClouds.length = 0;
+        chokingDevils.length = 0;
+        gameOverDevils.length = 0;
+        wetFartProjectiles.length = 0;
+        wetFartInflateTimer = 0;
+        piggyDamageTimer = 0;
+        invulnTimer = 1.5; // short grace period to react
         resurrectionState = 'done';
         startMusic();
       }
@@ -3999,8 +5249,8 @@ function update(dt) {
   // Beat tracking for music oinks
   if (musicPlaying) {
     beatTimer += dt;
-    if (beatTimer >= BEAT_DURATION) {
-      beatTimer -= BEAT_DURATION;
+    if (beatTimer >= currentBeatDuration) {
+      beatTimer -= currentBeatDuration;
       beatCount++;
       if (beatCount % 8 === 0) {
         playDoubleOink();
@@ -4014,6 +5264,7 @@ function update(dt) {
   if (flashTimer > 0) flashTimer -= dt;
   if (successFlashTimer > 0) successFlashTimer -= dt;
   if (piggyDamageTimer > 0) piggyDamageTimer -= dt;
+  if (invulnTimer > 0) invulnTimer -= dt;
   if (scoreBounceFactor > 0) scoreBounceFactor -= dt * 4;
   if (shakeVisualTimer > 0) {
     shakeVisualTimer -= dt;
@@ -4037,7 +5288,7 @@ function update(dt) {
     // Ground enemies speak
     if (groundEnemies.length > 0) {
       const e = groundEnemies[Math.floor(Math.random() * groundEnemies.length)];
-      spawnSpeechBubble(e.x, e.y, e.type);
+      spawnSpeechBubble(e.x, e.y, e.type === 'butcher_ground' ? 'butcher' : e.type);
     }
   }
   if (Math.random() < 0.004 && game.latchedDevil) {
@@ -4050,8 +5301,8 @@ function update(dt) {
   // Falling devils occasionally taunt
   if (Math.random() < 0.001) {
     for (const obj of objects) {
-      if (obj.type === 'devil' || obj.type === 'fast_devil' || obj.type === 'heavy_devil' || obj.type === 'thief_devil') {
-        spawnSpeechBubble(obj.x, obj.y, 'devil');
+      if (obj.type === 'devil' || obj.type === 'butcher') {
+        spawnSpeechBubble(obj.x, obj.y, obj.type === 'butcher' ? 'butcher' : 'devil');
         break;
       }
     }
@@ -4088,9 +5339,10 @@ function update(dt) {
       });
       spawnScorePopup(pu.x, pu.y - 20, POWER_UP_TYPES[pu.powerType].name + '!', POWER_UP_TYPES[pu.powerType].color);
       spawnParticles(pu.x, pu.y, POWER_UP_TYPES[pu.powerType].emoji, 5, 100);
-      // Freeze effect: stun all enemies
+      // Freeze effect: stun ALL enemies (ground, falling and boss), as promised
       if (pu.powerType === 'freeze') {
         for (const ge of groundEnemies) ge.frozen = 4;
+        if (boss && boss.state === 'fighting') boss.stunTimer = Math.max(boss.stunTimer, 4);
         triggerScreenShake(5, 0.3);
       }
       powerUpDrops.splice(i, 1);
@@ -4102,7 +5354,7 @@ function update(dt) {
   // Magnet effect: attract coins toward player
   if (hasPowerUp('magnet')) {
     for (const obj of objects) {
-      if (obj.type === 'coin' || obj.type === 'bill' || obj.type === 'moneybag' || obj.type === 'gold') {
+      if (obj.type === 'coin' || obj.type === 'special') {
         const dx = player.x - obj.x;
         const dy = player.y - obj.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -4114,14 +5366,20 @@ function update(dt) {
     }
   }
 
-  // Coin rain power-up: extra coins
+  // Coin rain power-up: extra coins (same shape as spawnObject coins -
+  // COIN_TYPES has no emoji/size fields, so build width/height explicitly)
   if (hasPowerUp('coinRain') && Math.random() < 0.1) {
     const ct = pickCoinType();
+    const crSize = ct.value >= 10 ? 40 : (ct.value >= 5 ? 36 : 30);
     objects.push({
-      type: 'coin', emoji: ct.emoji,
-      x: Math.random() * (WIDTH - 40) + 20,
-      y: -20, width: ct.size, height: ct.size,
+      type: 'coin',
+      coinType: ct,
+      x: Math.random() * (WIDTH - crSize) + crSize / 2,
+      y: -crSize / 2,
+      width: crSize,
+      height: crSize,
       speed: (game.levelConfig ? game.levelConfig.fallSpeed : 150) * 0.7,
+      emoji: null,
       value: ct.value
     });
   }
@@ -4171,6 +5429,11 @@ function update(dt) {
   }
   if (game.levelTimer <= 0) {
     game.levelTimer = 0;
+    // Per-level shop power-ups expire at the END of the level, so purchases
+    // made in the shop (before startLevel) apply to the entire next level.
+    scoreMultiplier = 1;
+    turboFart = false;
+    megaPoop = false;
     objects.length = 0;
     ejectedCoins.length = 0;
     if (game.latchedDevil) {
@@ -4183,17 +5446,19 @@ function update(dt) {
     stopMusic();
     if (game.level >= 10) {
       game.screen = 'victory';
-      if (game.cracks === 0) { playerBTC += 5; }
+      // Flawless is per-LEVEL (no hit taken this level), not per-run
+      if (!game.tookHitThisLevel) { playerBTC += 5; victoryFlawless = true; }
       saveToLeaderboard();
       initVictoryScene();
     } else {
       game.screen = 'levelComplete';
       levelCompleteTimer = 0;
       playLevelComplete();
-      // Flawless level bonus
-      if (game.cracks === 0) {
+      // Flawless level bonus - per-LEVEL: one hit in level 1 must not
+      // lock the bonus out for the whole rest of the run
+      if (!game.tookHitThisLevel) {
         playerBTC += 5;
-        spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Flawless!', '#F7931A');
+        spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Bez gre\u0161ke!', '#F7931A');
       }
       // Level complete confetti particles
       const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
@@ -4245,6 +5510,17 @@ function update(dt) {
     }
   } else {
     player.y = player.groundY;
+  }
+
+  // Buffered jump: a press made just before landing fires on touchdown
+  if (jumpBufferTimer > 0) {
+    jumpBufferTimer -= dt;
+    if (player.grounded && !game.latchedDevil) {
+      player.vy = player.jumpForce;
+      playJumpSound();
+      player.grounded = false;
+      jumpBufferTimer = 0;
+    }
   }
 
   // --- House Entry/Exit ---
@@ -4326,7 +5602,6 @@ function update(dt) {
         stealTimer: 0,
         zigzagSpeed, zigzagFreq, zigzagPhase,
         zigzagTime: 0,
-        knifeTimer: 0,
         nameTimer: 3.5
       });
     }
@@ -4421,17 +5696,40 @@ function update(dt) {
     if (wetFartInflateTimer <= 0) {
       // FIRE! Create the wet fart projectile
       const dir = wetFartPendingDir;
-      wetFartProjectiles.push({
-        x: player.x + dir * 30,
-        y: player.y,
-        dir: dir,
-        width: 60,
-        height: 40,
-        speed: 500,
-        life: 3.0,
-        wobble: 0,
-        trail: []
-      });
+      const wfStartX = player.x + dir * 30;
+      const wfStartY = player.y;
+      if (bossActive && boss && boss.state === 'fighting') {
+        // Kosi hitac: lobbed ballistic arc aimed at the boss's current
+        // position - a visible parabola instead of the invisible stink column
+        const T = WET_FART_ARC_TIME, G = WET_FART_ARC_G;
+        const vx = (boss.x - wfStartX) / T;
+        const vy = (boss.y - wfStartY - 0.5 * G * T * T) / T;
+        wetFartProjectiles.push({
+          x: wfStartX,
+          y: wfStartY,
+          dir: vx >= 0 ? 1 : -1,
+          ballistic: true,
+          vx: vx,
+          vy: vy,
+          width: 60,
+          height: 40,
+          life: 3.0,
+          wobble: 0,
+          trail: []
+        });
+      } else {
+        wetFartProjectiles.push({
+          x: wfStartX,
+          y: wfStartY,
+          dir: dir,
+          width: 60,
+          height: 40,
+          speed: 500,
+          life: 3.0,
+          wobble: 0,
+          trail: []
+        });
+      }
       playWetFartSound();
       triggerScreenShake(6, 0.3);
       spawnParticles(player.x, player.y, '\u{1F4A6}', 5, 80);
@@ -4442,7 +5740,13 @@ function update(dt) {
   // Update wet fart projectiles
   for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
     const wf = wetFartProjectiles[i];
-    wf.x += wf.speed * wf.dir * dt;
+    if (wf.ballistic) {
+      wf.vy += WET_FART_ARC_G * dt;
+      wf.x += wf.vx * dt;
+      wf.y += wf.vy * dt;
+    } else {
+      wf.x += wf.speed * wf.dir * dt;
+    }
     wf.life -= dt;
     wf.wobble += dt * 15;
 
@@ -4494,8 +5798,16 @@ function update(dt) {
       killVegan('wetfart');
     }
 
+    // A lobbed shot that missed the boss splats on the ground
+    if (wf.ballistic && wf.y > HEIGHT - 50) {
+      spawnParticles(wf.x, HEIGHT - 60, '\u{1F4A6}', 6, 100);
+      spawnParticles(wf.x, HEIGHT - 60, '\u{1F92E}', 2, 60);
+      wetFartProjectiles.splice(i, 1);
+      continue;
+    }
+
     // Remove if off screen or expired
-    if (wf.life <= 0 || wf.x < -100 || wf.x > WIDTH + 100) {
+    if (wf.life <= 0 || wf.x < -100 || wf.x > WIDTH + 100 || wf.y < -200) {
       wetFartProjectiles.splice(i, 1);
     }
   }
@@ -4534,7 +5846,7 @@ function update(dt) {
         squealTimer -= 0.4;
         // Alternate between squeal and knife sound
         if (Math.floor(devil.hammerAnimTimer / 0.4) % 2 === 0) {
-          playSqueal();
+          playSqueal(0.8);
         } else {
           playKnifeSound();
         }
@@ -4542,7 +5854,9 @@ function update(dt) {
     } else {
       if (squealTimer >= 0.5) {
         squealTimer -= 0.5;
-        playSqueal();
+        // Alternate full squeal / quiet whimper: keeps the panic, halves the fatigue
+        squealAlt = !squealAlt;
+        playSqueal(squealAlt ? 1 : 0.4);
       }
     }
 
@@ -4587,13 +5901,27 @@ function update(dt) {
         hitTimer: 0
       });
 
-      game.score = Math.max(0, game.score - 3);
-      spawnScorePopup(player.x, player.y - 50, '-3', '#ff4444');
+      // Reward a successful shake-off instead of punishing it: the player did
+      // exactly the right thing. Fast shakes earn a "perfect" BTC bonus and
+      // the thief spits back what he stole.
+      const perfectShake = devil.hammerTimer < devil.hammerTimeout * 0.5;
+      game.score += 5;
+      if (devil.devilType === 'thief') {
+        game.score += 5;
+        spawnScorePopup(player.x, player.y - 50, 'Vratio ukradeno! +10', '#44ff44');
+      } else {
+        spawnScorePopup(player.x, player.y - 50, '+5', '#44ff44');
+      }
+      if (perfectShake) {
+        playerBTC += 2;
+        spawnScorePopup(player.x, player.y - 72, 'SAVR\u0160ENO! +2 \u20BF', '#F7931A');
+      }
       // Sparkle particles for devil knock-off
       for (let i = 0; i < 5; i++) {
         spawnParticles(player.x, player.y - 30, '\u2B50', 1, 180);
       }
       playShakeSuccess();
+      if (navigator.vibrate) navigator.vibrate([30, 50, 30]); // haptic: shaken off!
 
       game.latchedDevil = null;
       lastShakeKey = null;
@@ -4656,6 +5984,12 @@ function update(dt) {
   // Update falling objects
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
+    // Freeze power-up stops falling devils/butchers in mid-air too
+    // ("Zamrzni sve neprijatelje!" must include the flying ones)
+    if ((obj.type === 'devil' || obj.type === 'butcher') && !obj.flyAway && hasPowerUp('freeze')) {
+      if (Math.random() < 0.03) spawnParticles(obj.x, obj.y, '❄️', 1, 30);
+      continue;
+    }
     obj.y += obj.speed * dt;
 
     // Parachute detachment for butchers
@@ -4737,6 +6071,7 @@ function update(dt) {
           squealTimer = 0;
           shakeHintTimer = 0;
           playDevilLatch();
+          if (navigator.vibrate) navigator.vibrate(80); // haptic: something grabbed you!
           // Show devil type indicator
           const dt = obj.devilType || 'fast';
           if (dt === 'fast') {
@@ -4746,8 +6081,14 @@ function update(dt) {
           } else if (dt === 'thief') {
             devilTypeIndicator = { text: '\u{1F911} LOPOV!', color: '#cc44ff', timer: 1.5 };
           }
+          objects.splice(i, 1);
+        } else {
+          // One devil is already latched: the newcomer bounces off instead of
+          // silently disappearing (holding a devil is not a free shield)
+          obj.flyAway = true;
+          obj.flyAwayTimer = 0.8;
+          spawnParticles(obj.x, obj.y, '\u{1F4AB}', 3, 80);
         }
-        objects.splice(i, 1);
         continue;
       } else if (obj.type === 'butcher') {
         if (!game.latchedDevil) {
@@ -4770,9 +6111,14 @@ function update(dt) {
           squealTimer = 0;
           shakeHintTimer = 0;
           playButcherLatch();
+          if (navigator.vibrate) navigator.vibrate(80); // haptic: something grabbed you!
           devilTypeIndicator = { text: '\u{1F52A} KASAPIN!', color: '#cc0000', timer: 2.0 };
+          objects.splice(i, 1);
+        } else {
+          obj.flyAway = true;
+          obj.flyAwayTimer = 0.8;
+          spawnParticles(obj.x, obj.y, '\u{1F4AB}', 3, 80);
         }
-        objects.splice(i, 1);
         continue;
       } else if (obj.type === 'material') {
         materials[obj.materialType]++;
@@ -4803,16 +6149,30 @@ function update(dt) {
         // Coin collected
         game.score += obj.value * scoreMultiplier;
         scoreBounceFactor = 1.0;
+        // A piggy bank that catches money should EARN money: gold and better
+        // (value >= 10) also pays out BTC, so every level funds one real shop
+        // decision instead of the shop being an empty storefront.
+        // (scoreMultiplier boosts score only - BTC income stays flat.)
+        if (obj.value >= 10) {
+          const btcGain = Math.floor(obj.value / 10); // gold +1, dollars +2, moneybag +3
+          playerBTC += btcGain;
+          spawnScorePopup(obj.x, obj.y - 32, '+' + btcGain + ' ₿', '#F7931A');
+        }
 
-        // Particles + sound based on value
+        // Combo streak: every consecutive catch raises the coin pitch a
+        // semitone (resets on damage or a coin hitting the ground)
+        coinCombo++;
+        const comboMul = Math.pow(2, Math.min(coinCombo - 1, 12) / 12);
+
+        // Particles + sound: a rising value ladder so the EARS know the catch
         if (obj.value === 1) {
           spawnParticles(obj.x, obj.y, '\u2728', 3, 120);
           spawnScorePopup(obj.x, obj.y - 10, '+1', '#ffffff');
-          playCoinCollect();
+          playCoinCollect(880 * comboMul);
         } else if (obj.value === 5) {
           spawnParticles(obj.x, obj.y, '\u2728', 4, 150);
           spawnScorePopup(obj.x, obj.y - 10, '+5', '#44dd44');
-          playBillCollect();
+          playCoinCollect(1100 * comboMul);
         } else if (obj.value === 10) {
           spawnParticles(obj.x, obj.y, '\u2728', 5, 180);
           spawnScorePopup(obj.x, obj.y - 10, '+10', '#ffd700');
@@ -4821,12 +6181,12 @@ function update(dt) {
           spawnParticles(obj.x, obj.y, '\u{1F4B5}', 4, 200);
           spawnParticles(obj.x, obj.y, '\u2728', 5, 160);
           spawnScorePopup(obj.x, obj.y - 10, '+20', '#22cc55');
-          playGoldCollect();
+          playBillCollect(); // the \ud83d\udcb5 bill finally gets the "bill" sound
         } else if (obj.value === 30) {
           spawnParticles(obj.x, obj.y, '\u{1F4B0}', 3, 200);
           spawnParticles(obj.x, obj.y, '\u2728', 8, 220);
           spawnScorePopup(obj.x, obj.y - 10, '+30', '#ff6600');
-          playGoldCollect();
+          playJackpot();
           // Extra flash for moneybag!
           flashTimer = 0.15;
           flashColor = 'rgba(255,215,0,';
@@ -4839,6 +6199,8 @@ function update(dt) {
 
     // Off screen
     if (obj.y > HEIGHT + obj.height) {
+      // A missed money drop breaks the pitch-combo streak
+      if (obj.type === 'coin' || obj.type === 'special') coinCombo = 0;
       objects.splice(i, 1);
     }
   }
@@ -4955,7 +6317,7 @@ function update(dt) {
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
       // Wolves spawn half as often, farmers/carnivores 40% less often
-      if (key === 'wolf' && Math.random() < 0.7) {
+      if (key === 'wolf' && Math.random() < 0.5) {
         groundEnemySpawnTimer = 0.5;
       } else if ((key === 'farmer' || key === 'carnivore') && Math.random() < 0.4) {
         groundEnemySpawnTimer = 0.8;
@@ -4984,6 +6346,15 @@ function update(dt) {
     const e = groundEnemies[i];
     e.animTimer += dt;
     e.nameTimer = Math.max(0, (e.nameTimer || 0) - dt);
+
+    // Freeze/stun check FIRST: a frozen wolf can't keep blowing a house down
+    // and a frozen enemy can't hurt the player
+    if (e.frozen > 0 || hasPowerUp('freeze')) {
+      if (e.frozen > 0) e.frozen -= dt;
+      e.blowTimer = 0;
+      if (Math.random() < 0.03) spawnParticles(e.x, e.y - 20, '❄️', 1, 30);
+      continue;
+    }
 
     // Wolf blowing at house mechanic
     if (e.blowingAtHouse) {
@@ -5037,36 +6408,30 @@ function update(dt) {
       }
     }
 
-    // Freeze/stun check
-    if (e.frozen > 0) {
-      e.frozen -= dt;
-    } else if (hasPowerUp('freeze')) {
-      // Don't move while freeze power-up is active
-    } else {
-      switch (e.ai) {
-        case 'straight':
+    // Movement AI (freeze handled above)
+    switch (e.ai) {
+      case 'straight':
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'chase':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'cunning':
+        if (e.pauseTimer > 0) {
+          e.pauseTimer -= dt;
+        } else {
           e.x += e.speed * e.dir * dt;
-          break;
-        case 'chase':
-          e.dir = player.x > e.x ? 1 : -1;
-          e.x += e.speed * e.dir * dt;
-          break;
-        case 'cunning':
-          if (e.pauseTimer > 0) {
-            e.pauseTimer -= dt;
-          } else {
-            e.x += e.speed * e.dir * dt;
-            if (Math.random() < 0.005) {
-              e.pauseTimer = 0.3 + Math.random() * 0.5;
-              e.dir *= -1;
-            }
+          if (Math.random() < 0.005) {
+            e.pauseTimer = 0.3 + Math.random() * 0.5;
+            e.dir *= -1;
           }
-          break;
-        case 'relentless':
-          e.dir = player.x > e.x ? 1 : -1;
-          e.x += e.speed * e.dir * dt;
-          break;
-      }
+        }
+        break;
+      case 'relentless':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
     }
 
     // Remove if off-screen (only for straight runners, others stay)
@@ -5096,6 +6461,23 @@ function update(dt) {
     }
   }
 
+  // Anti-overlap separation: chase/relentless enemies converge on the same spot
+  // and visually merge into one sprite. Push close pairs apart so the player
+  // always sees exactly how many threats are in front of them.
+  for (let a = 0; a < groundEnemies.length; a++) {
+    for (let b = a + 1; b < groundEnemies.length; b++) {
+      const e1 = groundEnemies[a], e2 = groundEnemies[b];
+      if (e1.blowingAtHouse || e2.blowingAtHouse) continue;
+      const dx = e2.x - e1.x;
+      if (Math.abs(dx) < 40) {
+        const push = (40 - Math.abs(dx)) / 2;
+        const s = dx >= 0 ? 1 : -1;
+        e1.x = Math.max(-20, Math.min(WIDTH + 20, e1.x - s * push));
+        e2.x = Math.max(-20, Math.min(WIDTH + 20, e2.x + s * push));
+      }
+    }
+  }
+
   // Update poops and check collision with ground enemies
   for (let p = poops.length - 1; p >= 0; p--) {
     const poop = poops[p];
@@ -5109,6 +6491,8 @@ function update(dt) {
       poops.splice(p, 1);
       continue;
     }
+    // Enemy traps don't kill the farmer's own allies (and never pay the player)
+    if (poop.isTrap) continue;
 
     for (let e = groundEnemies.length - 1; e >= 0; e--) {
       if (aabb(poop, groundEnemies[e])) {
@@ -5177,9 +6561,10 @@ function update(dt) {
 
     if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
 
-    // Poop collision - kills vegan!
+    // Poop collision - kills vegan! (only the PLAYER's poop - the death
+    // message blames the player, so enemy traps must not trigger it)
     for (const poop of poops) {
-      if (vegan && aabb(vegan, poop)) {
+      if (vegan && !poop.isTrap && aabb(vegan, poop)) {
         killVegan('poop');
         break;
       }
@@ -5235,9 +6620,18 @@ function update(dt) {
 
 function killVegan(cause) {
   if (!vegan) return;
-  const msg = cause === 'poop'
-    ? 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}'
-    : 'O ne, ubio si vegana! \u{1F607}';
+  // Blame the player only when the player actually did it (poop/wet fart);
+  // a vegan who dies fighting FOR you is a hero, not your victim.
+  let msg;
+  if (cause === 'poop') {
+    msg = 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}';
+  } else if (cause === 'wetfart') {
+    msg = 'O ne, uprskao si vegana! \u{1F4A6}\u{1F607}';
+  } else if (cause === 'enemy') {
+    msg = 'Vegan je herojski pao braneći te! \u{1F331}\u{1F607}';
+  } else {
+    msg = 'Vegana je pogodila nesreća! \u{1F622}';
+  }
   veganDeathAnim = {
     x: vegan.x, y: vegan.y,
     timer: 4.0,
@@ -5265,7 +6659,7 @@ function playVeganDeathSound() {
       gain.gain.setValueAtTime(0.15, now + i * 0.2);
       gain.gain.exponentialRampToValueAtTime(0.01, now + 2.0 + i * 0.2);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(sfxBus);
       osc.start(now + i * 0.2);
       osc.stop(now + 2.5);
     });
@@ -5311,20 +6705,28 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // Sun/moon using biome sun color
+  // Sun/moon using biome sun color. Kept away from the top-right corner -
+  // the lives, player name and the fixed fullscreen button live there, and a
+  // bright yellow disc underneath them made the HUD unreadable.
+  const sunX = WIDTH - 290;
+  const sunY = 55;
   ctx.fillStyle = b.sunColor;
   ctx.beginPath();
-  ctx.arc(WIDTH - 60, 50, 30, 0, Math.PI * 2);
+  ctx.arc(sunX, sunY, 30, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = b.sunColor;
   ctx.lineWidth = 2;
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2 + Date.now() / 3000;
     ctx.beginPath();
-    ctx.moveTo(WIDTH - 60 + Math.cos(angle) * 35, 50 + Math.sin(angle) * 35);
-    ctx.lineTo(WIDTH - 60 + Math.cos(angle) * 48, 50 + Math.sin(angle) * 48);
+    ctx.moveTo(sunX + Math.cos(angle) * 35, sunY + Math.sin(angle) * 35);
+    ctx.lineTo(sunX + Math.cos(angle) * 48, sunY + Math.sin(angle) * 48);
     ctx.stroke();
   }
+
+  // Distant biome silhouettes (offscreen canvas, one drawImage per frame)
+  if (biomeBackdropFor !== currentBiome) renderBiomeBackdrop();
+  ctx.drawImage(biomeBackdropCanvas, 0, 0);
 
   // Ambient particles (biome-specific)
   drawAmbientParticles();
@@ -6168,11 +7570,15 @@ function drawVeganSprite(x, y, dir, animTimer, state) {
   ctx.arc(1, -19, 5, 0.1, Math.PI - 0.1);
   ctx.stroke();
 
-  // "VEGAN" text on shirt
+  // "VEGAN" text on shirt - counter-flip so it never reads "NAGEV" in the
+  // mirror when he walks left
+  ctx.save();
+  if (dir < 0) ctx.scale(-1, 1);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 7px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('VEGAN', 1, -2);
+  ctx.fillText('VEGAN', dir < 0 ? -1 : 1, -2);
+  ctx.restore();
 
   // Peace sign if defending
   if (state === 'defend') {
@@ -6755,6 +8161,25 @@ function drawBoss() {
   ctx.arc(bx, by, auraSize, 0, Math.PI * 2);
   ctx.fill();
 
+  // Spotlight ring + target marker so the boss instantly reads as THE target
+  if (boss.state === 'fighting') {
+    ctx.save();
+    ctx.globalAlpha = 0.55 + Math.sin(t * 4) * 0.25;
+    ctx.strokeStyle = boss.phaseTwo ? '#FF5533' : '#FFD24A';
+    ctx.lineWidth = 5;
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -((t * 40) % 24);
+    ctx.beginPath();
+    ctx.arc(bx, by, boss.size * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.7 + Math.sin(t * 6) * 0.3;
+    ctx.font = 'bold 26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('\u{1F3AF}', bx, by - boss.size * 0.62 - 18 + Math.sin(t * 6) * 4);
+    ctx.restore();
+  }
+
   // Hit flash
   if (boss.hitFlash > 0) {
     ctx.shadowColor = '#fff';
@@ -6778,27 +8203,49 @@ function drawBoss() {
     }
   }
 
-  // HP bar
-  const barW = boss.size * 1.2;
-  const barH = 8;
-  const barX = bx - barW / 2;
-  const barY = by - boss.size * 0.5 - 15;
-  // Background
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
-  // HP fill
-  const hpPct = boss.hp / boss.maxHp;
-  const hpColor = hpPct > 0.5 ? '#44FF44' : hpPct > 0.25 ? '#FFAA00' : '#FF2222';
-  ctx.fillStyle = hpColor;
-  ctx.fillRect(barX, barY, barW * hpPct, barH);
-  // Boss name above HP
-  ctx.font = 'bold 14px sans-serif';
-  ctx.fillStyle = '#FF4444';
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 3;
-  ctx.strokeText(boss.name, bx, barY - 8);
-  ctx.fillText(boss.name, bx, barY - 8);
-  ctx.lineWidth = 1;
+  // (HP bar + name moved to a big fixed boss bar in drawHUD - the small bar
+  // glued to the boss was drawn above the top edge for the larger bosses)
+
+  // Swoop wind-up: pulsing red warning ring around the boss - "he's coming DOWN"
+  if (boss.state === 'fighting' && boss.swoopWindup > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(t * 20) * 0.4;
+    ctx.strokeStyle = '#FF3300';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(bx, by, boss.size * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // How-to-fight hint for the first seconds of the fight (kids don't guess
+  // that farts fly upward - tell them!)
+  if (boss.state === 'fighting' && boss.hintTimer > 0) {
+    const hintAlpha = Math.min(1, boss.hintTimer > 1 ? 0.5 + Math.sin(t * 5) * 0.3 : boss.hintTimer);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, hintAlpha);
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    const hintText = isMobile ? '\u{1F4A6} MOKRI dugme — kosi hitac na bosa!' : '\u{1F4A6} Q / E — kosi hitac na bosa! (+ SPACE prdež)';
+    const hy = by + boss.size * 0.5 + 24;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(hintText, bx, hy);
+    ctx.fillStyle = '#AFFF6E';
+    ctx.fillText(hintText, bx, hy);
+    ctx.restore();
+  }
+
+  // Slam/swoop telegraph: warning marker on the ground where the hit will land
+  if (boss.state === 'fighting' && (boss.pendingSlamTimer > 0 || boss.swoopWindup > 0 || boss.swoopPhase === 'down')) {
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(t * 15) * 0.4;
+    ctx.font = '30px sans-serif';
+    ctx.textAlign = 'center';
+    const markerX = (boss.swoopWindup > 0 || boss.swoopPhase === 'down') ? boss.targetX : bx;
+    ctx.fillText('⚠️', markerX, HEIGHT - 60);
+    ctx.restore();
+  }
 
   ctx.restore();
 }
@@ -6922,14 +8369,27 @@ function drawHUD() {
   const fartFont = mHud ? '28px sans-serif' : '20px sans-serif';
   const btcFont = mHud ? 'bold 20px sans-serif' : 'bold 14px sans-serif';
 
+  // Left inset on mobile: the fixed ⏸/❓ DOM buttons sit over the canvas'
+  // top-left corner, so the HUD moves right to stay readable/tappable
+  const hudL = mHud ? 75 : 0;
+
+  // Dark pill behind the whole left HUD block (score / farts / BTC /
+  // materials) - fixed colors like white score text and brown materials were
+  // unreadable on the bright Oblaci / Sneg skies and the dark Pakao sky.
+  // Same styling as the lives pill on the right, so the HUD reads as one system.
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(hudL + 8, 8, mHud ? 390 : 355, mHud ? 126 : 110, 10);
+  ctx.fill();
+
   // Top-left: Score with bouncing coin icon
   const coinBounce = Math.sin(Math.max(0, scoreBounceFactor) * Math.PI) * 5;
-  hudText('\u{1FA99}', 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
-  hudText(' Score: ' + game.score, mHud ? 48 : 38, 14, scoreFont, '#fff', 'left');
+  hudText('\u{1FA99}', hudL + 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
+  hudText(' Poeni: ' + game.score, hudL + (mHud ? 48 : 38), 14, scoreFont, '#fff', 'left');
 
   // Top-center: Level with rounded background
   ctx.textAlign = 'center';
-  const levelText = 'Level ' + game.level + (bossActive ? ' \u26A0\uFE0F BOSS' : ' - ' + currentBiome.name);
+  const levelText = 'Nivo ' + game.level + (bossActive ? ' \u26A0\uFE0F BOSS' : ' - ' + currentBiome.name);
   ctx.font = levelFont;
   const levelTextW = ctx.measureText(levelText).width;
   // Rounded background pill
@@ -6943,13 +8403,55 @@ function drawHUD() {
   ctx.fill();
   hudText(levelText, WIDTH / 2, 10, levelFont, '#fff', 'center');
 
+  // Boss fight: the level timer is frozen anyway (level can't end until the
+  // boss falls), so its slot shows a big, always-on-screen boss HP bar with
+  // name and a phase-2 notch - the small bar glued to the boss used to be
+  // drawn above the top edge for the larger bosses.
+  if (bossActive && boss) {
+    const bw = 280, bh = 14;
+    const bbx = WIDTH / 2 - bw / 2;
+    const bby = 40;
+    // Contrast pill behind the bar + name label (readable on every biome sky)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.roundRect(WIDTH / 2 - 175, 36, 350, mHud ? 48 : 42, 10);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    ctx.roundRect(bbx - 2, bby - 2, bw + 4, bh + 4, 7);
+    ctx.fill();
+    const bossPct = Math.max(0, boss.hp / boss.maxHp);
+    ctx.fillStyle = boss.hitFlash > 0 ? '#FFFFFF' : (boss.phaseTwo ? '#FF7722' : '#EE3333');
+    if (bossPct > 0) {
+      ctx.beginPath();
+      ctx.roundRect(bbx, bby, bw * bossPct, bh, 6);
+      ctx.fill();
+    }
+    // Phase 2 threshold notch: "two more farts to phase 2" becomes readable
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(bbx + bw / 2 - 1, bby - 3, 2, bh + 6);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bbx - 2, bby - 2, bw + 4, bh + 4, 7);
+    ctx.stroke();
+    const bossLabel = boss.emoji + ' ' + boss.name + (boss.phaseTwo ? ' \u{1F525} FAZA 2!' : '');
+    hudText(bossLabel, WIDTH / 2, mHud ? 58 : 56, timerFont, '#FFD0D0', 'center');
+  } else
   // Timer bar below level text
   if (game.levelConfig) {
     const timerBarWidth = 160;
     const timerBarHeight = 10;
     const timerBarX = WIDTH / 2 - timerBarWidth / 2;
     const timerBarY = 40;
-    const timerFill = Math.max(0, game.levelTimer / game.levelConfig.duration);
+    const timerFill = Math.min(1, Math.max(0, game.levelTimer / (game.levelConfig.duration + (isBossLevel(game.level) ? 15 : 0))));
+
+    // Contrast pill behind the bar + seconds text (white '84s' used to vanish
+    // against the bright Oblaci sky)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.roundRect(WIDTH / 2 - 95, 36, 190, mHud ? 46 : 38, 10);
+    ctx.fill();
 
     ctx.fillStyle = '#333';
     ctx.beginPath();
@@ -6976,13 +8478,25 @@ function drawHUD() {
     hudText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, mHud ? 58 : 54, timerFont, 'rgba(255,255,255,0.8)', 'center');
   }
 
-  // Top-right: Crack indicator with piggy icons
+  // Top-right: Crack indicator with piggy icons (inset on mobile so the fixed
+  // fullscreen button doesn't cover the last life)
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
-  const crackStartX = WIDTH - 15;
+  // Desktop is inset too (WIDTH - 75, not WIDTH - 15): the fixed fullscreen
+  // button sits over the very corner and used to cover the last life
+  const crackStartX = mHud ? WIDTH - 95 : WIDTH - 75;
   ctx.font = lifeFont;
   const crackSpacing = mHud ? 36 : 28;
   const maxCr = game.maxCracks || 3;
+  // Dark pill behind the lives row (and the player name under it) so the most
+  // important info in the game never sinks into a bright biome sky
+  const livesPillLeft = crackStartX - (maxCr - 1) * crackSpacing - (mHud ? 36 : 28);
+  const livesPillH = playerName ? (mHud ? 56 : 52) : (mHud ? 44 : 32);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(livesPillLeft, 8, crackStartX - livesPillLeft + 10, livesPillH, 10);
+  ctx.fill();
+  ctx.font = lifeFont;
   for (let i = 0; i < maxCr; i++) {
     const cx = crackStartX - (maxCr - 1 - i) * crackSpacing;
     if (i < game.cracks) {
@@ -7001,11 +8515,22 @@ function drawHUD() {
   }
   ctx.globalAlpha = 1.0;
 
+  // Mute toggle (M key or click/tap on the icon), under the lives pill
+  const muteY = mHud ? 80 : 68;
+  const muteX = WIDTH - (mHud ? 70 : 62);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(muteX, muteY, 54, 28, 8);
+  ctx.fill();
+  hudText(isMuted ? '\u{1F507}' : '\u{1F50A}', muteX + 6, muteY + 4, '18px sans-serif', '#fff', 'left');
+  hudText('M', muteX + 34, muteY + 7, 'bold 13px sans-serif', 'rgba(255,255,255,0.7)', 'left');
+  muteIconRect = { x: muteX, y: muteY, w: 54, h: 28 };
+
   // Fart meter (below score)
   const fartY = mHud ? 56 : 48;
-  hudText('\u{1F4A8} ', 15, fartY, fartFont, '#88cc44', 'left');
+  hudText('\u{1F4A8} ', hudL + 15, fartY, fartFont, '#88cc44', 'left');
   for (let i = 0; i < MAX_FARTS; i++) {
-    const fx = 42 + i * 22;
+    const fx = hudL + 42 + i * 22;
     if (i < fartCharges) {
       // Full charge - green cloud
       ctx.fillStyle = '#66cc33';
@@ -7024,16 +8549,17 @@ function drawHUD() {
       ctx.fill();
     }
   }
-  // Show corn hint when low on farts
+  // Show corn hint when low on farts (past the wet-fart counter at hudL+180,
+  // which it used to blink right on top of)
   if (fartCharges === 0) {
     const blink = Math.sin(Date.now() / 300) > 0;
     if (blink) {
-      hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
+      hudText('Uhvati \u{1F33D}!', hudL + 258, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
   }
 
   // Wet fart charges display
-  const wfX = 180;
+  const wfX = hudL + 180;
   ctx.font = mHud ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -7050,24 +8576,34 @@ function drawHUD() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🌾 ' + materials.straw + '/5', 16, matY + 1);
+  ctx.fillText('🌾 ' + materials.straw + '/5', hudL + 16, matY + 1);
   ctx.fillStyle = '#DAA520';
-  ctx.fillText('🌾 ' + materials.straw + '/5', 15, matY);
+  ctx.fillText('🌾 ' + materials.straw + '/5', hudL + 15, matY);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🪵 ' + materials.logs + '/7', 86, matY + 1);
+  ctx.fillText('🪵 ' + materials.logs + '/7', hudL + 86, matY + 1);
   ctx.fillStyle = '#8B4513';
-  ctx.fillText('🪵 ' + materials.logs + '/7', 85, matY);
+  ctx.fillText('🪵 ' + materials.logs + '/7', hudL + 85, matY);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🧱 ' + materials.bricks + '/10', 156, matY + 1);
+  ctx.fillText('🧱 ' + materials.bricks + '/10', hudL + 156, matY + 1);
   ctx.fillStyle = '#B22222';
-  ctx.fillText('🧱 ' + materials.bricks + '/10', 155, matY);
+  ctx.fillText('🧱 ' + materials.bricks + '/10', hudL + 155, matY);
   // House status indicator
   if (houses.length > 0) {
     const h = houses[0];
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 246, matY + 1);
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, hudL + 246, matY + 1);
     ctx.fillStyle = '#FFD700';
-    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 245, matY);
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, hudL + 245, matY);
+  } else if (canBuildHouse()) {
+    // Contextual hint: enough materials collected - teach the build action the
+    // moment it becomes possible
+    if (Math.sin(Date.now() / 250) > -0.3) {
+      ctx.font = mHud ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillText(mHud ? '🏠 KUĆA dugme!' : '[K] 🏠 Sagradi!', hudL + 246, matY + 1);
+      ctx.fillStyle = '#FFD700';
+      ctx.fillText(mHud ? '🏠 KUĆA dugme!' : '[K] 🏠 Sagradi!', hudL + 245, matY);
+    }
   }
 
   // Poop cooldown indicator
@@ -7081,8 +8617,9 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('\u{1F4A9} ' + Math.ceil(poopCooldown) + 's', WIDTH - 50, 101);
-  } else if (game.level >= 3) {
-    // Show ready indicator when poop is available (from level 3+)
+  } else {
+    // Show ready indicator whenever poop is available (the mechanic works
+    // from level 1, so the HUD must say so from level 1 too)
     ctx.font = '10px sans-serif';
     ctx.fillStyle = '#886600';
     ctx.textAlign = 'center';
@@ -7096,19 +8633,19 @@ function drawHUD() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('\u20BF ' + playerBTC, 16, btcY + 1);
+  ctx.fillText('\u20BF ' + playerBTC, hudL + 16, btcY + 1);
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('\u20BF ' + playerBTC, 15, btcY);
+  ctx.fillText('\u20BF ' + playerBTC, hudL + 15, btcY);
 
-  // Player name (top-right, below crack indicators)
+  // Player name (top-right, below crack indicators, on the same dark pill)
   if (playerName) {
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText(playerName, WIDTH - 16, 46);
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(playerName, WIDTH - 15, 45);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText(playerName, crackStartX - 1, mHud ? 47 : 43);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(playerName, crackStartX, mHud ? 46 : 42);
   }
 
   // Active shield indicator
@@ -7116,7 +8653,7 @@ function drawHUD() {
     ctx.font = '18px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('\uD83D\uDEE1\uFE0F', 155, 73);
+    ctx.fillText('\uD83D\uDEE1\uFE0F', hudL + 155, 73);
   }
 }
 
@@ -7155,9 +8692,24 @@ function drawShop() {
     ctx.beginPath();
     ctx.roundRect(x, y, cardW, cardH, 10);
     ctx.fill();
-    ctx.strokeStyle = canBuy ? '#FFD700' : '#333';
-    ctx.lineWidth = 2;
+    // Gold flash right after a purchase, red flash after a failed one,
+    // white highlight for the mobile "tap again to confirm" selection
+    var flashing = shopFlashItem === item.id && performance.now() < shopFlashUntil;
+    var errFlashing = shopErrorItem === item.id && performance.now() < shopErrorUntil;
+    var selected = isMobile && shopSelectedItem === item.id;
+    ctx.strokeStyle = flashing ? '#fff' : (errFlashing ? '#ff3333' : (selected ? '#7fe0ff' : (canBuy ? '#FFD700' : '#333')));
+    ctx.lineWidth = (flashing || errFlashing || selected) ? 5 : 2;
     ctx.stroke();
+
+    // Keyboard hint: digit key buys this card (desktop only)
+    if (!isMobile) {
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = canBuy ? '#FFD700' : '#555';
+      ctx.fillText('[' + (i + 1) + ']', x + 8, y + 6);
+      ctx.textBaseline = 'middle';
+    }
 
     // Icon
     ctx.font = `${isMobile ? 44 : 36}px sans-serif`;
@@ -7170,8 +8722,14 @@ function drawShop() {
     ctx.fillStyle = canBuy ? '#fff' : '#555';
     ctx.fillText(item.name, x + cardW / 2, y + (isMobile ? 80 : 65));
 
-    // Description
-    ctx.font = `${isMobile ? 13 : 11}px sans-serif`;
+    // Description - shrink the font until it fits inside the card, so no
+    // description ever bleeds into the neighbouring cards
+    var descSize = isMobile ? 13 : 11;
+    ctx.font = `${descSize}px sans-serif`;
+    while (descSize > 8 && ctx.measureText(item.desc).width > cardW - 12) {
+      descSize--;
+      ctx.font = `${descSize}px sans-serif`;
+    }
     ctx.fillStyle = canBuy ? '#aaa' : '#444';
     ctx.fillText(item.desc, x + cardW / 2, y + (isMobile ? 100 : 82));
 
@@ -7185,23 +8743,39 @@ function drawShop() {
     var buyBtnY = y + (isMobile ? 150 : 125);
     var buyBtnX = x + (isMobile ? 10 : 20);
     var buyBtnW = cardW - (isMobile ? 20 : 40);
-    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6);
+    // Boss levels refill wet farts for free - warn instead of taking the money
+    var wetFartBossFree = item.id === 'wetFart' && wetFartCharges < MAX_WET_FARTS && !!getBossForLevel(game.level + 1);
+    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS) || wetFartBossFree;
+    var isActive = !isMaxed && isShopItemActive(item);
     if (isMaxed) {
       ctx.fillStyle = '#555';
       ctx.beginPath();
       ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
       ctx.fill();
       ctx.fillStyle = '#aaa';
-      ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
-      ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      if (wetFartBossFree) {
+        ctx.font = `bold ${isMobile ? 13 : 10}px sans-serif`;
+        ctx.fillText('BOSS PUNI DŽABE', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      } else {
+        ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
+        ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      }
+    } else if (isActive) {
+      ctx.fillStyle = '#1d4d1d';
+      ctx.beginPath();
+      ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
+      ctx.fill();
+      ctx.fillStyle = '#7fe07f';
+      ctx.font = `bold ${isMobile ? 16 : 12}px sans-serif`;
+      ctx.fillText('AKTIVNO', x + cardW / 2, buyBtnY + buyBtnH / 2);
     } else if (canBuy) {
-      ctx.fillStyle = '#F7931A';
+      ctx.fillStyle = selected ? '#4CAF50' : '#F7931A';
       ctx.beginPath();
       ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
       ctx.fill();
       ctx.fillStyle = '#000';
       ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
-      ctx.fillText('KUPI', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      ctx.fillText(selected ? 'POTVRDI ✔' : 'KUPI', x + cardW / 2, buyBtnY + buyBtnH / 2);
     }
 
     // Store rect for click detection - entire card is tappable on mobile
@@ -7231,7 +8805,7 @@ function drawShop() {
   ctx.lineWidth = 2;
   const nextBiome = getBiomeForLevel(game.level + 1);
   const nextBossKey = getBossForLevel(game.level + 1);
-  let skipLabel = '\u25B6 Level ' + (game.level + 1) + ' - ' + nextBiome.name;
+  let skipLabel = '\u25B6 Nivo ' + (game.level + 1) + ' - ' + nextBiome.name;
   if (nextBossKey) skipLabel += ' \u26A0\uFE0F BOSS!';
   ctx.strokeText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
   ctx.fillText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
@@ -7243,21 +8817,60 @@ function drawShop() {
   ctx.fillStyle = '#aaa';
   ctx.textAlign = 'center';
   var activeText = 'Aktivno: ';
-  if (scoreMultiplier > 1) activeText += '2x Score ';
+  if (scoreMultiplier > 1) activeText += '2x Poeni ';
   if (hasShield) activeText += '\uD83D\uDEE1\uFE0F ';
   if (turboFart) activeText += '\uD83D\uDCA8\uD83D\uDCA8 ';
   if (megaPoop) activeText += '\uD83D\uDCA9\uD83D\uDCA9 ';
   if (activeText === 'Aktivno: ') activeText += 'ni\u0161ta';
-  ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
+  // Current supplies - so wet fart / extra life purchases are never made blind
+  activeText += '   |   \uD83D\uDCA6 ' + wetFartCharges + '/' + MAX_WET_FARTS
+    + '   \u2764\uFE0F ' + Math.max(0, (game.maxCracks || 3) - game.cracks) + '/' + (game.maxCracks || 3);
+  // Above the skip button (it used to be drawn half-inside its bottom edge)
+  ctx.fillText(activeText, WIDTH / 2, skipY - 16);
 
-  // ESC hint
+  // Help hint (mobile has no ESC key - point at the ? button instead)
   ctx.font = '13px sans-serif';
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.fillText('ESC - pravila i komande', WIDTH - 10, 15);
+  if (isMobile) {
+    ctx.fillText('❓ dugme - pravila i komande', WIDTH - 85, 15);
+  } else {
+    ctx.fillText('1-6 kupovina  ·  SPACE/ENTER dalje  ·  ESC pravila', WIDTH - 85, 15);
+  }
+}
+
+// Is a per-run shop item already active/maxed (buying again would waste BTC)?
+function isShopItemActive(item) {
+  if (item.id === 'doubleScore') return scoreMultiplier > 1;
+  if (item.id === 'shield') return hasShield;
+  if (item.id === 'turboFart') return turboFart;
+  if (item.id === 'megaPoop') return megaPoop;
+  if (item.id === 'extraLife') return game.maxCracks >= 6;
+  // Boss levels refill wet farts for free - buying them right before a boss
+  // would be wasted BTC, so the shop refuses to take the money
+  if (item.id === 'wetFart') return wetFartCharges >= MAX_WET_FARTS || !!getBossForLevel(game.level + 1);
+  return false;
+}
+
+// Shop purchase feedback: gold flash + cha-ching on success, red flash + oink on failure
+function shopBuySuccess(item) {
+  shopFlashItem = item.id;
+  shopFlashUntil = performance.now() + 450;
+  playPurchase(); // proper "ka-ching" - spending BTC should feel rewarding
+}
+function shopBuyFail(item) {
+  shopErrorItem = item.id;
+  shopErrorUntil = performance.now() + 450;
+  playErrorBuzz(); // clear "no sale" - an oink read as a success sound
 }
 
 function handleShopClick(e) {
+  // Ignore the very click that opened the shop (two click listeners receive
+  // the same event; the levelComplete "Nastavi" button overlaps the skip button)
+  if (performance.now() - shopEnteredAt < 300) return;
+  // Click while help overlay is open just closes the help
+  if (showHelp) { showHelp = false; return; }
+
   var rect = canvas.getBoundingClientRect();
   var clickX = (e.clientX - rect.left) * (WIDTH / rect.width);
   var clickY = (e.clientY - rect.top) * (HEIGHT / rect.height);
@@ -7265,25 +8878,33 @@ function handleShopClick(e) {
   // Check item buy buttons
   for (var si = 0; si < SHOP_ITEMS.length; si++) {
     var item = SHOP_ITEMS[si];
-    if (item._rect && playerBTC >= item.cost) {
-      // Block only when already at absolute max
-      if (item.id === 'extraLife' && game.maxCracks >= 6) continue;
-      var r = item._rect;
-      if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
-        playerBTC -= item.cost;
-        item.effect();
+    if (!item._rect) continue;
+    var r = item._rect;
+    if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
+      // Already active/maxed or not enough BTC: clear feedback, no charge
+      if (isShopItemActive(item) || playerBTC < item.cost) {
+        shopBuyFail(item);
+        shopSelectedItem = null;
         return;
       }
+      // Mobile: first tap only SELECTS the card (kids tap to read the
+      // description) - the second tap on the same card confirms the purchase
+      if (isMobile && shopSelectedItem !== item.id) {
+        shopSelectedItem = item.id;
+        return;
+      }
+      playerBTC -= item.cost;
+      item.effect();
+      shopBuySuccess(item);
+      shopSelectedItem = null;
+      return;
     }
   }
 
-  // Check skip button - on mobile, the entire bottom area works as skip
+  // Check skip button (big enough to tap on mobile - no blanket area needed)
   if (shopSkipRect) {
     var sr = shopSkipRect;
-    var hitSkip = (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h);
-    // On mobile: tap below cards area (y > 340) also works as skip
-    if (isMobile && clickY > 340) hitSkip = true;
-    if (hitSkip) {
+    if (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h) {
       game.level++;
       startLevel();
     }
@@ -7322,15 +8943,24 @@ function drawHelpScreen() {
 
   ctx.font = '16px sans-serif';
   ctx.fillStyle = '#fff';
-  const controls = [
-    ['\u2190 \u2192', 'Kretanje levo/desno'],
-    ['\u2191', 'Skok (preska\u010Duj neprijatelje)'],
+  const controls = isMobile ? [
+    ['\u25C0 \u25B6', 'Kretanje levo/desno'],
+    ['\u25B2\u25BC SKOK', 'Skok / dr\u017Ei za tresenje \u0111avola'],
+    ['\uD83D\uDCA8 PRDNI', 'Prde\u017E (gu\u0161i neprijatelje)'],
+    ['\uD83D\uDCA9 SERI', 'Kakanje (ubija po zemlji)'],
+    ['\uD83D\uDCA6 MOKRI', 'Vla\u017Eni prde\u017E levo/desno'],
+    ['\uD83C\uDFE0 KU\u0106A', 'Sagradi ku\u0107icu (5\uD83C\uDF3E/7\uD83E\uDEB5/10\uD83E\uDDF1)'],
+    ['\u23F8 / \u2753', 'Pauza / ovo uputstvo'],
+  ] : [
+    ['\u2190 \u2192 / A D', 'Kretanje levo/desno'],
+    ['\u2191 / W', 'Skok (preska\u010Duj neprijatelje)'],
     ['\u2191\u2193', 'Otresanje \u0111avola/kasapina (brzo)'],
     ['SPACE', 'Prde\u017E (\uD83D\uDCA8 gu\u0161i neprijatelje)'],
     ['SHIFT', 'Sranje (\uD83D\uDCA9 ubija po zemlji)'],
+    ['Q / E', 'Vla\u017Eni prde\u017E levo/desno (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
+    ['K', 'Sagradi ku\u0107icu (5\uD83C\uDF3E/7\uD83E\uDEB5/10\uD83E\uDDF1)'],
     ['ESC', 'Ovo uputstvo'],
     ['P', 'Pauza'],
-    ['Q / E', 'Vla\u017Eni prde\u017E levo/desno (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
     ['CMD+P', '\uD83E\uDD2B Tajna \u0161ifra...'],
   ];
   for (const [key, desc] of controls) {
@@ -7362,7 +8992,7 @@ function drawHelpScreen() {
     ['\uD83D\uDD2A', 'Kasapin - no\u017Eem napada'],
     ['\uD83D\uDC3A', 'Vuk - duva ku\u0107ice!'],
     ['\uD83E\uDD8A', 'Lisica - lukava i brza'],
-    ['\uD83C\uDF56', 'Meso\u017Eder - ho\u0107e pe\u010Denje'],
+    ['\uD83E\uDD69', 'Meso\u017Eder - ho\u0107e pe\u010Denje'],
     ['\uD83E\uDDD1\u200D\uD83C\uDF3E', 'Farmer - juri svinju'],
     ['\uD83C\uDF3F', 'Vegan - brani svinju!'],
     ['\u26A1', 'Munja - skloni se kad bljesne!'],
@@ -7386,7 +9016,7 @@ function drawHelpScreen() {
   y += 22;
   ctx.font = '15px sans-serif';
   ctx.fillStyle = '#ddd';
-  ctx.fillText('Skupljaj materijale: 5\uD83C\uDF3E = ku\u0107a od slame (2 HP) | 7\uD83E\uDEB5 = brvnara (3 HP) | 10\uD83E\uDDF1 = ku\u0107a od cigle (6 HP)', WIDTH / 2, y);
+  ctx.fillText('Skupljaj materijale pa ' + (isMobile ? 'pritisni \uD83C\uDFE0 KU\u0106A' : 'pritisni K') + ': 5\uD83C\uDF3E = slama (2 HP) | 7\uD83E\uDEB5 = brvnara (3 HP) | 10\uD83E\uDDF1 = cigla (6 HP)', WIDTH / 2, y);
   y += 20;
   ctx.fillText('Vuk duva ku\u0107ice! Slamu oduva odmah, pru\u0107e posle 3 duvanja, cigle NE MO\u017DE!', WIDTH / 2, y);
 
@@ -7396,7 +9026,7 @@ function drawHelpScreen() {
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 18px sans-serif';
   ctx.fillStyle = '#FFD700';
-  ctx.fillText('Pritisni ESC za nastavak', WIDTH / 2, y);
+  ctx.fillText(isMobile ? 'Tapni bilo gde za nastavak' : 'Pritisni ESC za nastavak', WIDTH / 2, y);
   ctx.globalAlpha = 1;
 }
 
@@ -7455,27 +9085,43 @@ function drawPauseMenu() {
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.strokeRect(50, 80, WIDTH - 100, HEIGHT - 130);
 
-  ctx.font = '16px sans-serif';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
 
-  const rules = [
+  // Controls column - keyboard players get keys, touch players get button names
+  const controlRules = isMobile ? [
+    '\u{1F3AE} KONTROLE (dodir):',
+    '  \u25C0 \u25B6 LEVO/DESNO - kretanje',
+    '  \u25B2\u25BC SKOK - skok / dr\u017Ei za tresenje \u0111avola',
+    '  \u{1F4A8} PRDNI - prde\u017E (gasi \u0111avole u vazduhu)',
+    '  \u{1F4A9} SERI - kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  \u{1F4A6} MOKRI - vla\u017Eni prde\u017E levo/desno',
+    '  \u{1F3E0} KU\u0106A - sagradi ku\u0107icu (5\u{1F33E} / 7\u{1FAB5} / 10\u{1F9F1})',
+  ] : [
     '\u{1F3AE} KONTROLE:',
-    '  \u2190 \u2192  Kretanje levo/desno',
-    '  \u2191     Skok',
-    '  \u2193     Brzo prizemljenje (u vazduhu) / Tresenje (\u0111avo na le\u0111ima)',
+    '  \u2190 \u2192 / A D  Kretanje levo/desno',
+    '  \u2191 / W  Skok (\u2191\u2193 tresenje kad se \u0111avo zaka\u010Di)',
+    '  \u2193 / S  Brzo prizemljenje (u vazduhu)',
     '  SPACE  Prde\u017E (gasi \u0111avole u vazduhu)',
-    '  \u2190 + \u2192  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  SHIFT  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  Q / E  Vla\u017Eni prde\u017E levo/desno \u{1F4A6}\u{1F4A8}',
+    '  K      Sagradi ku\u0107icu (5\u{1F33E} / 7\u{1FAB5} / 10\u{1F9F1})',
     '  P/ESC  Pauza',
+  ];
+
+  const leftRules = controlRules.concat([
     '',
     '\u{1F4B0} SAKUPLJAJ:',
-    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (3)  \u{1F947} Zlatni (5)',
-    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)  \u{1F33D} Kukuruz (puni prde\u017Ee)',
+    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (5)  \u{1F947} Zlatni (10)',
+    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)',
+    '  \u{1F33D} Kukuruz (puni prde\u017Ee)  \u{1F33E}\u{1FAB5}\u{1F9F1} Materijali',
     '',
     '\u26A0\uFE0F IZBEGAVAJ:',
     '  \u{1F4A3} Bombe - eksplodiraju',
-    '  \u26A1 Munje - od nivoa 4 (upozorenje: \u017Euti blesak na oblaku)',
-    '',
+    '  \u26A1 Munje - od nivoa 4 (\u017Euti blesak = upozorenje)',
+  ]);
+
+  const rightRules = [
     '\u{1F47F} NEPRIJATELJI KOJI PADAJU:',
     '  \u{1F608} \u0110avo brzi - tresi gore/dole da ga skine\u0161',
     '  \u{1F47F} \u0110avo te\u0161ki - sporiji ali tra\u017Ei vi\u0161e tresenja',
@@ -7490,22 +9136,27 @@ function drawPauseMenu() {
     '',
     '\u{1F33F} SAVEZNICI:',
     '  \u{1F9D1}\u200D\u{1F33E} Vegan - brani te od meso\u017Edera i farmera',
-    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne (ako ima\u0161 dovoljno para!)',
+    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne',
+    '     (ako ima\u0161 dovoljno para!)',
   ];
 
-  let y = 105;
-  for (const line of rules) {
-    if (line.startsWith('\u{1F3AE}') || line.startsWith('\u{1F4B0}') || line.startsWith('\u26A0') ||
-        line.startsWith('\u{1F47F}') || line.startsWith('\u{1F43A}') || line.startsWith('\u{1F33F}')) {
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillStyle = '#FFD700';
-    } else {
-      ctx.font = '14px sans-serif';
-      ctx.fillStyle = '#ddd';
+  // Two columns so everything fits inside the box (80..HEIGHT-50)
+  function drawRulesColumn(lines, x) {
+    let y = 105;
+    for (const line of lines) {
+      if (/^\S/.test(line) && line !== '') {
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillStyle = '#FFD700';
+      } else {
+        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#ddd';
+      }
+      ctx.fillText(line, x, y);
+      y += line === '' ? 10 : 19;
     }
-    ctx.fillText(line, 70, y);
-    y += line === '' ? 8 : 18;
   }
+  drawRulesColumn(leftRules, 70);
+  drawRulesColumn(rightRules, WIDTH / 2 + 30);
 
   // Resume hint
   ctx.font = 'bold 20px sans-serif';
@@ -7513,7 +9164,7 @@ function drawPauseMenu() {
   ctx.fillStyle = '#4CAF50';
   const pulse = Math.sin(Date.now() / 400) * 0.2 + 0.8;
   ctx.globalAlpha = pulse;
-  ctx.fillText('Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
+  ctx.fillText(isMobile ? '\u25B6 Tapni bilo gde za nastavak' : 'Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
   ctx.globalAlpha = 1;
 }
 
@@ -8824,10 +10475,23 @@ function drawIntroScene5(t) {
   ctx.restore();
 
   // Tutorial entries with staggered slide-in
-  const entries = [
-    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno' },
-    { icon: '\u2B06', text: 'Skok' },
-    { icon: '\u2B07', text: 'Brzo sletanje / Otresi \u0111avole' },
+  // (touch players see the on-screen button names, not keyboard keys)
+  const entries = isMobile ? [
+    { icon: '\u25C0 \u25B6', text: 'Kretanje levo-desno' },
+    { icon: '\u25B2\u25BC', text: 'SKOK - skok / dr\u017Ei za tresenje \u0111avola' },
+    { icon: '\u{1F4A8}', text: 'PRDNI - prde\u017E oblak (gasi \u0111avole!)' },
+    { icon: '\u{1F4A6}', text: 'MOKRI - vla\u017Eni prde\u017E levo/desno' },
+    { icon: '\u{1F4A9}', text: 'SERI - kakanje (zamka za neprijatelje)' },
+    { icon: '\u{1F3E0}', text: 'KU\u0106A - gradi ku\u0107u od materijala!' },
+    { icon: '', text: '' },
+    { icon: '\u{1FA99}\u{1F4B5}\u{1F4B0}', text: 'Hvataj nov\u010Di\u0107e i nov\u010Danice!' },
+    { icon: '\u{1F4A3}\u26A1', text: 'Izbegavaj bombe i munje!' },
+    { icon: '\u{1F43A}\u{1F98A}\u{1F52A}', text: 'Neprijatelji: presko\u010Di ili ubij!' },
+    { icon: '\u{1F9F2}\u26A1\u{1F47B}\u2744\uFE0F', text: 'Power-upi: magnet, turbo, freeze...' },
+  ] : [
+    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno (ili A / D)' },
+    { icon: '\u2B06 \u2B07', text: 'Skok / brzo sletanje (ili W / S)' },
+    { icon: '\u2B06\u2B07', text: 'TRESI naizmeni\u010Dno - skini \u0111avola s le\u0111a!' },
     { icon: 'SPACE', text: 'Prde\u017E oblak \u{1F4A8} (gasi \u0111avole!)' },
     { icon: 'Q / E', text: 'Vla\u017Eni prde\u017E \u{1F4A6}\u{1F4A8} levo/desno' },
     { icon: 'SHIFT', text: 'Kakanje \u{1F4A9} (zamka za neprijatelje)' },
@@ -8902,25 +10566,26 @@ function drawIntroScene5(t) {
   // "Klikni za pocetak" premium button
   const btnY = HEIGHT - 50;
   const pulse = Math.sin(t * 3) * 0.15 + 0.85;
-  // Glow ring
+  // Glow ring (wide enough for the "Klikni ili SPACE" desktop label)
+  const startBtnW = isMobile ? 240 : 300;
   ctx.strokeStyle = `rgba(255, 102, 153, ${pulse * 0.5})`;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 130, btnY - 20, 260, 40, 20);
+  ctx.roundRect(WIDTH / 2 - startBtnW / 2 - 10, btnY - 20, startBtnW + 20, 40, 20);
   ctx.stroke();
   // Button fill
-  const btnGrad = ctx.createLinearGradient(WIDTH / 2 - 120, btnY - 18, WIDTH / 2 + 120, btnY + 18);
+  const btnGrad = ctx.createLinearGradient(WIDTH / 2 - startBtnW / 2, btnY - 18, WIDTH / 2 + startBtnW / 2, btnY + 18);
   btnGrad.addColorStop(0, '#FF6699');
   btnGrad.addColorStop(1, '#FF3377');
   ctx.fillStyle = btnGrad;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 120, btnY - 16, 240, 34, 17);
+  ctx.roundRect(WIDTH / 2 - startBtnW / 2, btnY - 16, startBtnW, 34, 17);
   ctx.fill();
   ctx.font = 'bold 18px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
-  ctx.fillText('\u25B6 Klikni za po\u010Detak!', WIDTH / 2, btnY);
+  ctx.fillText(isMobile ? '\u25B6 Tapni za po\u010Detak!' : '\u25B6 Klikni ili SPACE za po\u010Detak!', WIDTH / 2, btnY);
 }
 
 function drawIntro() {
@@ -9008,9 +10673,13 @@ function drawIntro() {
       ctx.globalAlpha = lineAlpha;
       ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.lineWidth = 3;
-      ctx.strokeText(scene.lines[i], WIDTH / 2, HEIGHT - 80 + i * 30);
+      // Anchor the BLOCK's last line just above the letterbox bar - 3-line
+      // scenes used to push their last line under the bar and the
+      // "Klikni za zvuk!" hint
+      const lineY = HEIGHT - 50 - (scene.lines.length - i) * 30;
+      ctx.strokeText(scene.lines[i], WIDTH / 2, lineY);
       ctx.fillStyle = '#fff';
-      ctx.fillText(scene.lines[i], WIDTH / 2, HEIGHT - 80 + i * 30);
+      ctx.fillText(scene.lines[i], WIDTH / 2, lineY);
     }
     ctx.lineWidth = 1;
     ctx.restore();
@@ -9040,7 +10709,19 @@ function drawIntro() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = '#fff';
-    ctx.fillText('SPACE \u25B6', WIDTH - 20, HEIGHT - 10);
+    ctx.fillText(isMobile ? 'Tapni \u25B6' : 'SPACE \u25B6', WIDTH - 20, HEIGHT - 10);
+    ctx.globalAlpha = 1.0;
+  }
+
+  // "Skip everything" button at bottom-left (tap/click target checked in the
+  // canvas click handler; ESC does the same on keyboard)
+  if (audioUnlocked) {
+    ctx.globalAlpha = 0.6;
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('\u23ED Presko\u010Di sve' + (isMobile ? '' : ' (ESC)'), 20, HEIGHT - 10);
     ctx.globalAlpha = 1.0;
   }
 
@@ -9259,11 +10940,19 @@ function drawTitle() {
   ctx.lineWidth = 1;
   ctx.fillText('Hvataj nov\u010di\u0107e! Izbegavaj bombe!', WIDTH / 2, HEIGHT / 2 + 10);
 
-  // Player greeting
-  if (playerName) {
-    ctx.font = '18px sans-serif';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText('Igra\u010D: ' + playerName, WIDTH / 2, HEIGHT / 2 + 40);
+  // Player greeting + lifetime bank balance (all BTC ever earned across runs)
+  if (playerName || totalBTC > 0) {
+    // Dark text with a soft white outline - the old #aaa on the light blue
+    // sky was nearly invisible, and y+40 leaned on the start button below
+    ctx.font = 'bold 18px sans-serif';
+    let greetLine = playerName ? 'Igra\u010D: ' + playerName : '';
+    if (totalBTC > 0) greetLine += (greetLine ? '   \u00B7   ' : '') + '\uD83C\uDFE6 Banka: \u20BF ' + totalBTC;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(greetLine, WIDTH / 2, HEIGHT / 2 + 35);
+    ctx.fillStyle = '#2d2d2d';
+    ctx.fillText(greetLine, WIDTH / 2, HEIGHT / 2 + 35);
+    ctx.lineWidth = 1;
   }
 
   // Start prompt - BIG TAP BUTTON
@@ -9288,7 +10977,7 @@ function drawTitle() {
   ctx.lineWidth = 1;
 
   // Leaderboard
-  var lb = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+  var lb = loadLeaderboard();
   if (lb.length > 0) {
     ctx.font = 'bold 18px sans-serif';
     ctx.fillStyle = '#FFD700';
@@ -9300,9 +10989,34 @@ function drawTitle() {
       var entry = lb[li];
       var medal = li === 0 ? '\uD83E\uDD47' : li === 1 ? '\uD83E\uDD48' : li === 2 ? '\uD83E\uDD49' : '  ';
       ctx.fillStyle = li === 0 ? '#FFD700' : li === 1 ? '#C0C0C0' : li === 2 ? '#CD7F32' : '#aaa';
-      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')', WIDTH / 2, HEIGHT - 145 + li * 22);
+      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' poena (nivo ' + entry.level + ')' + (entry.btc ? '  ₿' + entry.btc : ''), WIDTH / 2, HEIGHT - 145 + li * 22);
     }
   }
+
+  // Quick controls line - a player who skipped the intro must still be able
+  // to learn the basics BEFORE the first devil lands on their back
+  ctx.font = '15px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    isMobile
+      ? '◀ ▶ kretanje · SKOK · PRDNI \u{1F4A8} · SERI \u{1F4A9} · dugmad na ekranu!'
+      : '← → kretanje · ↑ skok · ↑↓ tresi đavola · SPACE prdež \u{1F4A8} · SHIFT kaka \u{1F4A9} · ESC pravila',
+    WIDTH / 2, HEIGHT - 25);
+
+  // "📖 Priča" button (bottom-left) - replays the intro cutscene
+  // (hit-rect checked in the canvas click handler: 20..175 x HEIGHT-58..HEIGHT-16)
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(20, HEIGHT - 58, 155, 42, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('\u{1F4D6} Priča', 97, HEIGHT - 36);
+  ctx.lineWidth = 1;
 }
 
 // --- Draw House ---
@@ -9579,6 +11293,26 @@ function drawPlayingScene() {
     ctx.textBaseline = 'middle';
     ctx.fillText('\u{1F4A8}', 0, 0);
 
+    ctx.restore();
+  }
+
+  // Aim preview: dotted arc from the piggy to the boss while a wet fart is
+  // inflating, so the "kosi hitac" trajectory is obvious before it fires
+  if (wetFartInflateTimer > 0 && bossActive && boss && boss.state === 'fighting') {
+    const T = WET_FART_ARC_TIME, G = WET_FART_ARC_G;
+    const sx = player.x + wetFartPendingDir * 30;
+    const sy = player.y;
+    const avx = (boss.x - sx) / T;
+    const avy = (boss.y - sy - 0.5 * G * T * T) / T;
+    ctx.save();
+    ctx.globalAlpha = 0.45 + Math.sin(Date.now() / 80) * 0.2;
+    ctx.fillStyle = '#AFFF6E';
+    for (let s = 1; s <= 12; s++) {
+      const tt = T * s / 12;
+      ctx.beginPath();
+      ctx.arc(sx + avx * tt, sy + avy * tt + 0.5 * G * tt * tt, s === 12 ? 7 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -9870,10 +11604,21 @@ function drawPlayingScene() {
     ctx.font = Math.round(28 * ms) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
-    // Green stink waves rising
+    if (poop.isTrap) {
+      // Enemy trap: pulsing red warning ring so it can't be mistaken for
+      // the player's own (harmless-to-him) poop
+      const trapPulse = 0.35 + Math.sin(poop.stinkTimer * 6) * 0.2;
+      ctx.fillStyle = 'rgba(255, 40, 40, ' + trapPulse + ')';
+      ctx.beginPath();
+      ctx.ellipse(poop.x, poop.y + 8, 26, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillText(poop.emoji || '\u{1F4A9}', poop.x, poop.y);
+    // Stink waves rising (red for enemy traps, green for player poop)
     const alpha = poop.life / POOP_DURATION;
-    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
+    ctx.strokeStyle = poop.isTrap
+      ? `rgba(230, 60, 60, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`
+      : `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
     ctx.lineWidth = 2;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
@@ -9950,6 +11695,19 @@ function drawPlayingScene() {
   // Latched devil on top of player
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
+
+    // Pulsing red danger vignette on the screen edges - the latched sprite
+    // alone is easy to miss, this makes the "shake NOW" urgency readable even
+    // in peripheral vision, and it intensifies as heart loss approaches
+    const dangerT = Math.min(devil.hammerTimer / devil.hammerTimeout, 1.0);
+    const dangerPulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+    const dangerInt = (0.12 + dangerT * 0.33) * dangerPulse;
+    const dvg = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.35, WIDTH / 2, HEIGHT / 2, HEIGHT * 0.85);
+    dvg.addColorStop(0, 'rgba(255,0,0,0)');
+    dvg.addColorStop(1, 'rgba(255,0,0,' + dangerInt.toFixed(3) + ')');
+    ctx.fillStyle = dvg;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
     const devilFontSize = devil.devilType === 'heavy' ? 44 : (devil.devilType === 'thief' ? 40 : 36);
     ctx.font = devilFontSize + 'px sans-serif';
     ctx.textAlign = 'center';
@@ -10024,8 +11782,8 @@ function drawPlayingScene() {
     ctx.fillStyle = '#ffff00';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 3;
-    ctx.strokeText('\u2B06\u2B07 SHAKE!', player.x, player.y - 95);
-    ctx.fillText('\u2B06\u2B07 SHAKE!', player.x, player.y - 95);
+    ctx.strokeText('\u2B06\u2B07 TRESI!', player.x, player.y - 95);
+    ctx.fillText('\u2B06\u2B07 TRESI!', player.x, player.y - 95);
     ctx.globalAlpha = 1.0;
     ctx.lineWidth = 1;
 
@@ -10371,6 +12129,8 @@ function playVictoryMusic() {
   if (!audioCtx) return;
   const ctx2 = audioCtx;
   const now = ctx2.currentTime;
+  // Only the most recent pass can still be sounding - drop older references
+  victoryMusicNodes = victoryMusicNodes.slice(-8);
   // C major peaceful melody - idyllic farm feel
   const melody = [
     { freq: 523, dur: 0.45 }, // C5
@@ -10391,9 +12151,10 @@ function playVictoryMusic() {
     gain.gain.setValueAtTime(0.08, now + t);
     gain.gain.exponentialRampToValueAtTime(0.01, now + t + note.dur - 0.05);
     osc.connect(gain);
-    gain.connect(ctx2.destination);
+    gain.connect(musicBus);
     osc.start(now + t);
     osc.stop(now + t + note.dur);
+    victoryMusicNodes.push(osc);
     t += note.dur;
   });
 }
@@ -10403,6 +12164,9 @@ function stopVictoryMusic() {
     clearTimeout(victoryMusicTimeout);
     victoryMusicTimeout = null;
   }
+  // Actually silence the melody tail so it can't leak onto the title screen
+  victoryMusicNodes.forEach(n => { try { n.stop(); } catch(e) {} });
+  victoryMusicNodes = [];
 }
 
 function playGunshotSound() {
@@ -10418,7 +12182,7 @@ function playGunshotSound() {
   gain.gain.setValueAtTime(0.3, now);
   gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
   osc.connect(gain);
-  gain.connect(ctx2.destination);
+  gain.connect(sfxBus);
   osc.start(now);
   osc.stop(now + 0.2);
 }
@@ -10479,27 +12243,29 @@ function drawVictory() {
   ctx.lineTo(0, HEIGHT);
   ctx.fill();
 
-  // Red American barn
+  // Red American barn - sits lower on the hills so its roof stays clear of
+  // the title/score/thank-you text stack at the top of the screen
+  const barnTop = HEIGHT * 0.4;
   ctx.fillStyle = '#B22222';
-  ctx.fillRect(WIDTH / 2 - 80, HEIGHT * 0.35, 160, 100);
+  ctx.fillRect(WIDTH / 2 - 80, barnTop, 160, 100);
   // Roof
   ctx.fillStyle = '#8B0000';
   ctx.beginPath();
-  ctx.moveTo(WIDTH / 2 - 100, HEIGHT * 0.35);
-  ctx.lineTo(WIDTH / 2, HEIGHT * 0.25);
-  ctx.lineTo(WIDTH / 2 + 100, HEIGHT * 0.35);
+  ctx.moveTo(WIDTH / 2 - 100, barnTop);
+  ctx.lineTo(WIDTH / 2, barnTop - 60);
+  ctx.lineTo(WIDTH / 2 + 100, barnTop);
   ctx.fill();
   // Barn door
   ctx.fillStyle = '#5B1010';
-  ctx.fillRect(WIDTH / 2 - 20, HEIGHT * 0.35 + 40, 40, 60);
+  ctx.fillRect(WIDTH / 2 - 20, barnTop + 40, 40, 60);
   // White X on barn
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 10);
-  ctx.lineTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 90);
-  ctx.moveTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 10);
-  ctx.lineTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 90);
+  ctx.moveTo(WIDTH / 2 - 60, barnTop + 10);
+  ctx.lineTo(WIDTH / 2 + 60, barnTop + 90);
+  ctx.moveTo(WIDTH / 2 + 60, barnTop + 10);
+  ctx.lineTo(WIDTH / 2 - 60, barnTop + 90);
   ctx.stroke();
 
   // Barbed wire fence (on top of/replacing picket fence)
@@ -10702,8 +12468,17 @@ function drawVictory() {
   ctx.fillStyle = '#FFD700';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.strokeText('Final Score: ' + game.score, WIDTH / 2, 120);
-  ctx.fillText('Final Score: ' + game.score, WIDTH / 2, 120);
+  ctx.strokeText('Ukupno poena: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+  ctx.fillText('Ukupno poena: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+
+  // Flawless bonus on the final level must be celebrated, not silent
+  if (victoryFlawless) {
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#F7931A';
+    ctx.lineWidth = 2;
+    ctx.strokeText('⭐ Bonus bez greške: +5 ₿', WIDTH / 2, 150);
+    ctx.fillText('⭐ Bonus bez greške: +5 ₿', WIDTH / 2, 150);
+  }
 
   // Thank you message (fades in after 3 seconds)
   if (victoryTimer > 3) {
@@ -10712,8 +12487,8 @@ function drawVictory() {
     ctx.fillStyle = '#ff6699';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
-    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
-    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 178);
+    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 178);
     ctx.globalAlpha = 1;
   }
 
@@ -10786,15 +12561,39 @@ function drawLevelComplete() {
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 3;
   const biomeLabel = currentBiome.name;
-  const bossLabel = bossDefeatedThisLevel ? ' \u{1F3C6} BOSS DEFEATED!' : '';
-  ctx.strokeText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
-  ctx.fillText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
+  const bossLabel = bossDefeatedThisLevel ? ' \u{1F3C6} BOSS POBEĐEN!' : '';
+  ctx.strokeText('Nivo ' + game.level + ' (' + biomeLabel + ') završen!' + bossLabel, WIDTH / 2, 40);
+  ctx.fillText('Nivo ' + game.level + ' (' + biomeLabel + ') završen!' + bossLabel, WIDTH / 2, 40);
   ctx.lineWidth = 1;
 
-  // Score
+  // Level earnings recap - celebrate what THIS level brought in, so players
+  // learn which tactics actually earn BTC (fades in shortly after the totals)
+  const scoreGain = game.score - (game.lastScore || 0);
+  const btcGain = playerBTC - (game.lastBTC || 0);
+  const recapAlpha = Math.min(1, Math.max(0, (levelCompleteTimer - 0.5) * 2));
+  ctx.globalAlpha = recapAlpha;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = '#F7931A';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  const recapText = 'Ovaj nivo: ' + (scoreGain >= 0 ? '+' : '') + scoreGain + ' poena   \u00B7   ' + (btcGain >= 0 ? '+' : '') + btcGain + ' \u20BF';
+  const recapY = HEIGHT - (isMobile ? 160 : 110);
+  ctx.strokeText(recapText, WIDTH / 2, recapY);
+  ctx.fillText(recapText, WIDTH / 2, recapY);
+  ctx.globalAlpha = 1.0;
+  ctx.lineWidth = 1;
+
+  // Total score - white with outline (the old #444 was invisible on the dark
+  // Suma/Grad/Pakao skies) and lifted clear of the "Dalje - Shop" button
   ctx.font = '28px sans-serif';
-  ctx.fillStyle = '#444';
-  ctx.fillText('\u{1FA99} Score: ' + game.score + '   \u20BF ' + playerBTC, WIDTH / 2, HEIGHT - 80);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  const totalsText = '\u{1FA99} Poeni: ' + game.score + '   \u20BF ' + playerBTC;
+  const totalsY = HEIGHT - (isMobile ? 195 : 145);
+  ctx.strokeText(totalsText, WIDTH / 2, totalsY);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(totalsText, WIDTH / 2, totalsY);
+  ctx.lineWidth = 1;
 
   // Next level prompt - BIG TAP BUTTON for mobile
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
@@ -11012,9 +12811,9 @@ function drawGameOver() {
   ctx.font = 'bold 48px sans-serif';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 4;
-  ctx.strokeText('\u{1F525} Game Over! \u{1F525}', WIDTH / 2, 60);
+  ctx.strokeText('\u{1F525} Kraj igre! \u{1F525}', WIDTH / 2, 60);
   ctx.fillStyle = '#ff4400';
-  ctx.fillText('\u{1F525} Game Over! \u{1F525}', WIDTH / 2, 60);
+  ctx.fillText('\u{1F525} Kraj igre! \u{1F525}', WIDTH / 2, 60);
   ctx.lineWidth = 1;
 
   // Sad message
@@ -11025,15 +12824,23 @@ function drawGameOver() {
   ctx.fillText('Kasica je zavr\u0161ila na ra\u017Enju...', WIDTH / 2, 105);
   ctx.globalAlpha = 1.0;
 
-  // Score info
-  ctx.font = '26px sans-serif';
-  ctx.fillStyle = '#dda050';
-  ctx.fillText('Level: ' + game.level + '   \u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 55);
+  // Score info - kept ABOVE the "Nova igra" button (HEIGHT-120/70 upward),
+  // which used to be drawn right on top of these two lines
+  const goStatsY = HEIGHT - (isMobile ? 185 : 140);
+  ctx.font = 'bold 26px sans-serif';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 4;
+  ctx.strokeText('Nivo: ' + game.level + '   \u{1FA99} Poeni: ' + game.score, WIDTH / 2, goStatsY);
+  ctx.fillStyle = '#ffcc88';
+  ctx.fillText('Nivo: ' + game.level + '   \u{1FA99} Poeni: ' + game.score, WIDTH / 2, goStatsY);
 
   // BTC earned
-  ctx.font = '20px sans-serif';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.lineWidth = 3;
+  ctx.strokeText('\u20BF ' + playerBTC + ' Bitcoin zara\u0111eno', WIDTH / 2, goStatsY + 28);
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin zaradjeno', WIDTH / 2, HEIGHT - 30);
+  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin zara\u0111eno', WIDTH / 2, goStatsY + 28);
+  ctx.lineWidth = 1;
 
   // --- Laughing devils around the spit ---
   for (const d of gameOverDevils) {
@@ -11111,6 +12918,20 @@ function drawGameOver() {
     ctx.restore();
   }
 
+  // While the angel sequence plays there is deliberately no restart button -
+  // but a silent screen looks frozen, so tell the player to hang on
+  if (resurrectionState !== 'done' && resurrectionState !== 'none') {
+    const waitPulse = 0.4 + 0.3 * Math.abs(Math.sin(Date.now() / 400));
+    ctx.save();
+    ctx.globalAlpha = waitPulse;
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('\u{1F47C} Sačekaj... anđeo odlučuje o tvojoj sudbini!', WIDTH / 2, 105);
+    ctx.restore();
+  }
+
   // Restart prompt - BIG TAP BUTTON (only when resurrection sequence is done)
   if (resurrectionState === 'done') {
     const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
@@ -11139,12 +12960,12 @@ function drawGameOver() {
 // --- Name Input Handlers ---
 document.getElementById('nameSubmitBtn').addEventListener('click', function() {
   const name = document.getElementById('playerNameInput').value.trim();
-  if (name.length > 0) {
-    playerName = name;
-    localStorage.setItem('kasicaPlayerName', playerName);
-    hideNameInput();
-    game.screen = 'intro';
-  }
+  // An empty name must never silently dead-end the very first screen a child
+  // sees - fall back to a cute default and let them play.
+  playerName = name.length > 0 ? name : 'Prasence';
+  localStorage.setItem('kasicaPlayerName', playerName);
+  hideNameInput();
+  game.screen = 'intro';
 });
 
 document.getElementById('playerNameInput').addEventListener('keydown', function(e) {
@@ -11158,6 +12979,10 @@ document.getElementById('playerNameInput').addEventListener('keydown', function(
 if (!playerName) {
   game.screen = 'nameInput';
   showNameInput();
+} else if (localStorage.getItem('kasicaIntroSeen')) {
+  // Returning player: straight to the title - no 6-scene toll booth before
+  // every session. The story stays one click away ("📖 Priča" on the title).
+  game.screen = 'title';
 } else {
   game.screen = 'intro';
 }
@@ -11188,13 +13013,26 @@ function gameLoop(timestamp) {
 
   // Show/hide mobile controls based on game state
   const pauseBtnEl = document.getElementById('pauseBtn');
+  const helpBtnEl = document.getElementById('helpBtn');
   if (isMobile) {
     // DOM touch buttons are always hidden - canvas zones replace them
     touchControlsEl.classList.remove('visible');
+    // Auto-pause while the phone is held in portrait (rotate overlay is up)
+    if (portraitBlocked && game.screen === 'playing' && !isPaused) {
+      setPaused(true);
+    }
     if (game.screen === 'playing') {
       pauseBtnEl.style.display = 'block';
+      helpBtnEl.style.display = 'block';
+      // If a devil latches while the SKOK zone is ALREADY held, convert the
+      // held zone into shake mode (a press-time-only decision would leave the
+      // held button doing nothing)
+      if (game.latchedDevil && activeZones['jump'] && !shakeZoneHeld && !isPaused) {
+        startTouchShake();
+      }
     } else {
       pauseBtnEl.style.display = 'none';
+      helpBtnEl.style.display = game.screen === 'shop' ? 'block' : 'none';
       // Release all keys when leaving playing state
       Object.keys(keys).forEach(k => keys[k] = false);
       // Clear canvas touch state
