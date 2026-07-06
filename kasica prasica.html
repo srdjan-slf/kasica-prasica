@@ -1416,8 +1416,11 @@ let audioUnlockedAt = 0; // when the unlock happened (document-level listeners f
 // feed masterBus -> destination. This gives one master mute/volume point
 // instead of dozens of hardcoded connections to ctx.destination.
 let masterBus = null, musicBus = null, sfxBus = null;
+// Music is ALWAYS on by default: one accidental tap on the speaker icon used
+// to persist mute forever via localStorage and players thought music broke.
+// Mute is now session-only (M key / icon), and any stale saved flag is wiped.
 let isMuted = false;
-try { isMuted = localStorage.getItem('kasicaMuted') === '1'; } catch(e) {}
+try { localStorage.removeItem('kasicaMuted'); } catch(e) {}
 function getAudioContext() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1436,7 +1439,6 @@ function getAudioContext() {
 }
 function toggleMute() {
   isMuted = !isMuted;
-  try { localStorage.setItem('kasicaMuted', isMuted ? '1' : '0'); } catch(e) {}
   if (masterBus && audioCtx) {
     masterBus.gain.setTargetAtTime(isMuted ? 0 : 1, audioCtx.currentTime, 0.02);
   }
@@ -3987,14 +3989,17 @@ canvas.addEventListener('click', (e) => {
   if (game.screen === 'nameInput') return;
   const wasUnlocked = audioUnlocked;
   unlockAudio();
-  // Mute icon (drawn in the playing HUD) is clickable
+  // Mute icon (drawn in the playing HUD) is clickable, with a forgiving
+  // 12px margin around it and visible feedback so a tap never feels lost
   if (muteIconRect && game.screen === 'playing') {
     const mrect = canvas.getBoundingClientRect();
     const mcx = (e.clientX - mrect.left) * WIDTH / mrect.width;
     const mcy = (e.clientY - mrect.top) * HEIGHT / mrect.height;
-    if (mcx >= muteIconRect.x && mcx <= muteIconRect.x + muteIconRect.w &&
-        mcy >= muteIconRect.y && mcy <= muteIconRect.y + muteIconRect.h) {
+    const pad = 12;
+    if (mcx >= muteIconRect.x - pad && mcx <= muteIconRect.x + muteIconRect.w + pad &&
+        mcy >= muteIconRect.y - pad && mcy <= muteIconRect.y + muteIconRect.h + pad) {
       toggleMute();
+      spawnScorePopup(player.x, player.y - 40, isMuted ? '\u{1F507} Zvuk isključen' : '\u{1F50A} Zvuk uključen', '#ffffff');
       return;
     }
   }
@@ -8515,16 +8520,22 @@ function drawHUD() {
   }
   ctx.globalAlpha = 1.0;
 
-  // Mute toggle (M key or click/tap on the icon), under the lives pill
+  // Mute toggle (M key or click/tap on the icon), under the lives pill.
+  // Big enough to actually hit with a finger, and clearly a button.
   const muteY = mHud ? 80 : 68;
-  const muteX = WIDTH - (mHud ? 70 : 62);
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  const muteX = WIDTH - (mHud ? 84 : 76);
+  ctx.fillStyle = isMuted ? 'rgba(150,30,30,0.5)' : 'rgba(0,0,0,0.35)';
   ctx.beginPath();
-  ctx.roundRect(muteX, muteY, 54, 28, 8);
+  ctx.roundRect(muteX, muteY, 68, 36, 10);
   ctx.fill();
-  hudText(isMuted ? '\u{1F507}' : '\u{1F50A}', muteX + 6, muteY + 4, '18px sans-serif', '#fff', 'left');
-  hudText('M', muteX + 34, muteY + 7, 'bold 13px sans-serif', 'rgba(255,255,255,0.7)', 'left');
-  muteIconRect = { x: muteX, y: muteY, w: 54, h: 28 };
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(muteX, muteY, 68, 36, 10);
+  ctx.stroke();
+  hudText(isMuted ? '\u{1F507}' : '\u{1F50A}', muteX + 8, muteY + 7, '22px sans-serif', '#fff', 'left');
+  hudText('M', muteX + 44, muteY + 11, 'bold 14px sans-serif', 'rgba(255,255,255,0.7)', 'left');
+  muteIconRect = { x: muteX, y: muteY, w: 68, h: 36 };
 
   // Fart meter (below score)
   const fartY = mHud ? 56 : 48;
