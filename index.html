@@ -725,6 +725,9 @@ const chokingDevils = [];      // devils that got farted on (dying animation)
 let wetFartCharges = 5;
 const MAX_WET_FARTS = 8;
 let wetFartProjectiles = []; // active projectiles
+// Boss-fight lob: flight time and gravity of the aimed ballistic arc
+const WET_FART_ARC_TIME = 0.85;
+const WET_FART_ARC_G = 900;
 let wetFartInflateTimer = 0; // inflation animation before firing
 let wetFartPendingDir = 0;   // direction to fire after inflation
 
@@ -4515,6 +4518,11 @@ function drawMobileTouchZones() {
     } else if (z.id === 'wetLeft' || z.id === 'wetRight') {
       label = 'x' + wetFartCharges;
       disabled = wetFartCharges <= 0;
+      // During a boss fight the wet fart IS the weapon - make the button beg
+      if (!disabled && bossActive && boss && boss.state === 'fighting') {
+        highlight = true;
+        label = 'BOSS! x' + wetFartCharges;
+      }
     } else if (z.id === 'house') {
       const can = canBuildHouse();
       disabled = !can;
@@ -4665,7 +4673,7 @@ function updateBoss(dt) {
       boss.y = 60;
       boss.state = 'fighting';
       bossActive = true;
-      boss.hintTimer = 8; // teach the counterplay for the first seconds of the fight
+      boss.hintTimer = 12; // teach the counterplay for the first seconds of the fight
       triggerEnemyIntro('boss_' + boss.type);
       spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u26A0\uFE0F BOSS: ' + boss.name + ' \u26A0\uFE0F', '#FF0000');
       triggerScreenShake(10, 0.5);
@@ -4858,14 +4866,17 @@ function updateBoss(dt) {
       fartClouds.splice(i, 1);
     }
   }
-  // Boss takes damage from wet fart projectiles.
-  // The stink rises as a column: a wet fart passing under the boss hits it
-  // regardless of height (bosses hover at y=60, projectiles fly at player height).
+  // Boss takes damage from wet fart projectiles. New lobbed shots (ballistic)
+  // must actually reach the boss's body; old horizontal shots fired outside
+  // the fight keep the rising stink-column behavior as a fallback.
   for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
     const wf = wetFartProjectiles[i];
-    if (Math.abs(wf.x - boss.x) < boss.size * 0.8) {
+    const hitsBoss = wf.ballistic
+      ? Math.hypot(wf.x - boss.x, wf.y - boss.y) < boss.size * 0.75
+      : Math.abs(wf.x - boss.x) < boss.size * 0.8;
+    if (hitsBoss) {
       damageBoss(3);
-      // Rising stink visual so the hit reads clearly
+      spawnScorePopup(boss.x, boss.y - boss.size * 0.5, '\u{1F4A6} POGODAK!', '#AFFF6E');
       spawnParticles(boss.x, boss.y + boss.size / 2, '\u{1F4A6}', 4, 100);
       spawnParticles(wf.x, wf.y - 30, '\u{1F4A8}', 3, 120);
       wetFartProjectiles.splice(i, 1);
@@ -5685,17 +5696,40 @@ function update(dt) {
     if (wetFartInflateTimer <= 0) {
       // FIRE! Create the wet fart projectile
       const dir = wetFartPendingDir;
-      wetFartProjectiles.push({
-        x: player.x + dir * 30,
-        y: player.y,
-        dir: dir,
-        width: 60,
-        height: 40,
-        speed: 500,
-        life: 3.0,
-        wobble: 0,
-        trail: []
-      });
+      const wfStartX = player.x + dir * 30;
+      const wfStartY = player.y;
+      if (bossActive && boss && boss.state === 'fighting') {
+        // Kosi hitac: lobbed ballistic arc aimed at the boss's current
+        // position - a visible parabola instead of the invisible stink column
+        const T = WET_FART_ARC_TIME, G = WET_FART_ARC_G;
+        const vx = (boss.x - wfStartX) / T;
+        const vy = (boss.y - wfStartY - 0.5 * G * T * T) / T;
+        wetFartProjectiles.push({
+          x: wfStartX,
+          y: wfStartY,
+          dir: vx >= 0 ? 1 : -1,
+          ballistic: true,
+          vx: vx,
+          vy: vy,
+          width: 60,
+          height: 40,
+          life: 3.0,
+          wobble: 0,
+          trail: []
+        });
+      } else {
+        wetFartProjectiles.push({
+          x: wfStartX,
+          y: wfStartY,
+          dir: dir,
+          width: 60,
+          height: 40,
+          speed: 500,
+          life: 3.0,
+          wobble: 0,
+          trail: []
+        });
+      }
       playWetFartSound();
       triggerScreenShake(6, 0.3);
       spawnParticles(player.x, player.y, '\u{1F4A6}', 5, 80);
@@ -5706,7 +5740,13 @@ function update(dt) {
   // Update wet fart projectiles
   for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
     const wf = wetFartProjectiles[i];
-    wf.x += wf.speed * wf.dir * dt;
+    if (wf.ballistic) {
+      wf.vy += WET_FART_ARC_G * dt;
+      wf.x += wf.vx * dt;
+      wf.y += wf.vy * dt;
+    } else {
+      wf.x += wf.speed * wf.dir * dt;
+    }
     wf.life -= dt;
     wf.wobble += dt * 15;
 
@@ -5758,8 +5798,16 @@ function update(dt) {
       killVegan('wetfart');
     }
 
+    // A lobbed shot that missed the boss splats on the ground
+    if (wf.ballistic && wf.y > HEIGHT - 50) {
+      spawnParticles(wf.x, HEIGHT - 60, '\u{1F4A6}', 6, 100);
+      spawnParticles(wf.x, HEIGHT - 60, '\u{1F92E}', 2, 60);
+      wetFartProjectiles.splice(i, 1);
+      continue;
+    }
+
     // Remove if off screen or expired
-    if (wf.life <= 0 || wf.x < -100 || wf.x > WIDTH + 100) {
+    if (wf.life <= 0 || wf.x < -100 || wf.x > WIDTH + 100 || wf.y < -200) {
       wetFartProjectiles.splice(i, 1);
     }
   }
@@ -8113,6 +8161,25 @@ function drawBoss() {
   ctx.arc(bx, by, auraSize, 0, Math.PI * 2);
   ctx.fill();
 
+  // Spotlight ring + target marker so the boss instantly reads as THE target
+  if (boss.state === 'fighting') {
+    ctx.save();
+    ctx.globalAlpha = 0.55 + Math.sin(t * 4) * 0.25;
+    ctx.strokeStyle = boss.phaseTwo ? '#FF5533' : '#FFD24A';
+    ctx.lineWidth = 5;
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -((t * 40) % 24);
+    ctx.beginPath();
+    ctx.arc(bx, by, boss.size * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.7 + Math.sin(t * 6) * 0.3;
+    ctx.font = 'bold 26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('\u{1F3AF}', bx, by - boss.size * 0.62 - 18 + Math.sin(t * 6) * 4);
+    ctx.restore();
+  }
+
   // Hit flash
   if (boss.hitFlash > 0) {
     ctx.shadowColor = '#fff';
@@ -8157,9 +8224,9 @@ function drawBoss() {
     const hintAlpha = Math.min(1, boss.hintTimer > 1 ? 0.5 + Math.sin(t * 5) * 0.3 : boss.hintTimer);
     ctx.save();
     ctx.globalAlpha = Math.max(0, hintAlpha);
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = 'bold 20px sans-serif';
     ctx.textAlign = 'center';
-    const hintText = isMobile ? '\u{1F4A8} Prdni ga! (PRDNI / MOKRI dugme)' : '\u{1F4A8} Prdni ga! (SPACE ili Q/E)';
+    const hintText = isMobile ? '\u{1F4A6} MOKRI dugme — kosi hitac na bosa!' : '\u{1F4A6} Q / E — kosi hitac na bosa! (+ SPACE prdež)';
     const hy = by + boss.size * 0.5 + 24;
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 4;
@@ -11226,6 +11293,26 @@ function drawPlayingScene() {
     ctx.textBaseline = 'middle';
     ctx.fillText('\u{1F4A8}', 0, 0);
 
+    ctx.restore();
+  }
+
+  // Aim preview: dotted arc from the piggy to the boss while a wet fart is
+  // inflating, so the "kosi hitac" trajectory is obvious before it fires
+  if (wetFartInflateTimer > 0 && bossActive && boss && boss.state === 'fighting') {
+    const T = WET_FART_ARC_TIME, G = WET_FART_ARC_G;
+    const sx = player.x + wetFartPendingDir * 30;
+    const sy = player.y;
+    const avx = (boss.x - sx) / T;
+    const avy = (boss.y - sy - 0.5 * G * T * T) / T;
+    ctx.save();
+    ctx.globalAlpha = 0.45 + Math.sin(Date.now() / 80) * 0.2;
+    ctx.fillStyle = '#AFFF6E';
+    for (let s = 1; s <= 12; s++) {
+      const tt = T * s / 12;
+      ctx.beginPath();
+      ctx.arc(sx + avx * tt, sy + avy * tt + 0.5 * G * tt * tt, s === 12 ? 7 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
