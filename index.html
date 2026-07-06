@@ -111,7 +111,7 @@
     min-height: 44px;
   }
   #fullscreenBtn:hover, #fullscreenBtn:active { background: rgba(0,0,0,0.7); }
-  #pauseBtn {
+  #pauseBtn, #helpBtn {
     display: none;
     position: fixed;
     top: 8px;
@@ -126,8 +126,36 @@
     cursor: pointer;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 44px;
+    min-height: 44px;
   }
-  #pauseBtn:hover { background: rgba(0,0,0,0.6); }
+  #helpBtn { top: 60px; }
+  #pauseBtn:hover, #helpBtn:hover { background: rgba(0,0,0,0.6); }
+  #rotateOverlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 500;
+    background: rgba(10, 10, 25, 0.96);
+    color: #fff;
+    text-align: center;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: bold;
+  }
+  #rotateOverlay .phone {
+    font-size: 72px;
+    margin-bottom: 20px;
+    animation: rotatePhoneHint 1.6s ease-in-out infinite;
+  }
+  @keyframes rotatePhoneHint {
+    0%, 20% { transform: rotate(0deg); }
+    60%, 100% { transform: rotate(90deg); }
+  }
   #nameInputOverlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -142,7 +170,12 @@
 <body>
 <canvas id="gameCanvas"></canvas>
 <button id="fullscreenBtn">&#x26F6;</button>
-<button id="pauseBtn" onclick="togglePause()">&#x23F8;</button>
+<button id="pauseBtn" onclick="togglePause(); this.blur();">&#x23F8;</button>
+<button id="helpBtn" onclick="toggleHelpOverlay(); this.blur();">&#x2753;</button>
+<div id="rotateOverlay">
+  <div class="phone">&#x1F4F1;</div>
+  <div>Okreni telefon vodoravno!</div>
+</div>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
@@ -203,9 +236,28 @@ function resizeCanvas() {
     canvas.style.height = (HEIGHT * scale) + 'px';
   }
 }
+// Portrait blocker: the game is landscape-only on phones. When a touch device
+// is held in portrait, show a full-screen "rotate your phone" overlay; the
+// game loop also auto-pauses gameplay while this is up.
+let portraitBlocked = false;
+function updateOrientationOverlay() {
+  const isTouchDev = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  portraitBlocked = isTouchDev && window.innerHeight > window.innerWidth;
+  const ov = document.getElementById('rotateOverlay');
+  if (ov) ov.style.display = portraitBlocked ? 'flex' : 'none';
+}
+
 resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 100); });
+updateOrientationOverlay();
+window.addEventListener('resize', () => { resizeCanvas(); updateOrientationOverlay(); });
+window.addEventListener('orientationchange', () => { setTimeout(() => { resizeCanvas(); updateOrientationOverlay(); }, 100); });
+
+// Lock to landscape where the API is supported (Android Chrome in fullscreen)
+function lockLandscape() {
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
 
 function toggleFullscreen() {
   const elem = document.documentElement;
@@ -216,13 +268,14 @@ function toggleFullscreen() {
   if (!isFS) {
     // Try standard Fullscreen API (works on Android Chrome, desktop)
     if (elem.requestFullscreen) {
-      elem.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+      elem.requestFullscreen({ navigationUI: 'hide' }).then(lockLandscape).catch(() => {
         // Fallback: try webkit version
-        if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        if (elem.webkitRequestFullscreen) { elem.webkitRequestFullscreen(); lockLandscape(); }
         else fakeFullscreen();
       });
     } else if (elem.webkitRequestFullscreen) {
       elem.webkitRequestFullscreen();
+      lockLandscape();
     } else {
       // iOS Safari: no Fullscreen API - use fake fullscreen
       fakeFullscreen();
@@ -258,9 +311,7 @@ function fakeFullscreen() {
   }, 100);
 
   // Try to lock screen orientation to landscape if available
-  if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock('landscape').catch(() => {});
-  }
+  lockLandscape();
 }
 
 // Detect iOS Safari (no Fullscreen API support)
@@ -320,13 +371,23 @@ fsBtn.addEventListener('touchend', function(e) {
   e.stopPropagation();
   if (isIOS && !isStandalone && !document.fullscreenElement) {
     fakeFullscreen();
-    showIOSHint();
+    // Show the "Add to Home Screen" instructions only once - repeat visitors
+    // just get the fake fullscreen toggle without the overlay
+    let hintShown = false;
+    try { hintShown = !!localStorage.getItem('kasicaIosHintShown'); } catch (_) {}
+    if (!hintShown) {
+      try { localStorage.setItem('kasicaIosHintShown', '1'); } catch (_) {}
+      showIOSHint();
+    }
   } else {
     toggleFullscreen();
   }
+  this.blur();
 }, { passive: false });
 fsBtn.addEventListener('click', function(e) {
   if (!('ontouchstart' in window)) toggleFullscreen();
+  // Drop focus so a later Enter/Space press can't re-toggle fullscreen mid-game
+  this.blur();
 });
 
 // --- Level Configuration (with difficulty tuning) ---
@@ -2911,10 +2972,29 @@ function togglePause() {
   }
 }
 
+// Used by the on-screen ? button (mobile has no ESC key): toggles the
+// help/rules overlay during gameplay and in the shop.
+function toggleHelpOverlay() {
+  if (game.screen === 'playing') {
+    if (showHelp) {
+      showHelp = false;
+      setPaused(false);
+    } else {
+      showHelp = true;
+      setPaused(true);
+    }
+  } else if (game.screen === 'shop') {
+    showHelp = !showHelp;
+  }
+}
+
 // Shop entry helper: clears stale click rects from the previous shop visit and
 // records entry time, so the same click/tap/keypress that opened the shop can
 // never immediately buy an item or hit the skip button.
 let shopEnteredAt = 0;
+// Gold flash on a card just bought with a digit key
+let shopFlashItem = null;
+let shopFlashUntil = 0;
 function enterShop() {
   shopSkipRect = null;
   SHOP_ITEMS.forEach(function(it) { it._rect = null; });
@@ -2924,6 +3004,17 @@ function enterShop() {
 
 // --- Input ---
 const keys = {};
+// WASD aliases: left hand plays exactly like the arrows (A/D move, W jump, S slam)
+const KEY_ALIAS = {
+  w: 'ArrowUp', W: 'ArrowUp',
+  a: 'ArrowLeft', A: 'ArrowLeft',
+  s: 'ArrowDown', S: 'ArrowDown',
+  d: 'ArrowRight', D: 'ArrowRight'
+};
+// Jump buffer: a jump pressed just before landing executes on touchdown
+let jumpBufferTimer = 0;
+// Throttle for "no charges" feedback popups
+let lastEmptyPopupAt = 0;
 window.addEventListener('keydown', (e) => {
   // SECRET CHEAT: CMD+P (Mac) or Ctrl+P (Win/Linux) = Continue from where you died
   if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
@@ -2951,6 +3042,7 @@ window.addEventListener('keydown', (e) => {
       fartClouds.length = 0;
       chokingDevils.length = 0;
       gameOverDevils.length = 0;
+      bossProjectiles.length = 0; // fireballs from the previous life must not greet the respawn
       wetFartProjectiles.length = 0;
       wetFartInflateTimer = 0;
       resurrectionState = null;
@@ -2968,7 +3060,7 @@ window.addEventListener('keydown', (e) => {
   // Don't process game keys during name input
   if (game.screen === 'nameInput') return;
 
-  // Shop keyboard controls: SPACE/Enter = next level, ESC = help
+  // Shop keyboard controls: SPACE/Enter = next level, 1-6 = buy item, ESC = help
   if (game.screen === 'shop') {
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
@@ -2980,6 +3072,16 @@ window.addEventListener('keydown', (e) => {
     } else if (e.key === 'Escape') {
       e.preventDefault();
       showHelp = !showHelp;
+    } else if (e.key >= '1' && e.key <= '6' && !e.repeat && !showHelp) {
+      // Digit keys buy the matching card - the shop is fully keyboard playable
+      if (performance.now() - shopEnteredAt < 300) return;
+      const shopItem = SHOP_ITEMS[parseInt(e.key, 10) - 1];
+      if (shopItem && playerBTC >= shopItem.cost && !isShopItemActive(shopItem)) {
+        playerBTC -= shopItem.cost;
+        shopItem.effect();
+        shopFlashItem = shopItem.id;
+        shopFlashUntil = performance.now() + 450;
+      }
     }
     return;
   }
@@ -2988,10 +3090,25 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
 
-  // Help overlay - ESC
+  // Normalize WASD to arrow keys for all gameplay checks below
+  const gk = KEY_ALIAS[e.key] || e.key;
+
+  // ESC on the intro cutscene skips straight to the title
+  if (e.key === 'Escape' && game.screen === 'intro') {
+    stopIntroMusic();
+    game.screen = 'title';
+    introScene = 0;
+    e.preventDefault();
+    return;
+  }
+
+  // Help overlay - ESC. From a plain pause ESC resumes (as the overlay says);
+  // otherwise it opens the help (and closes it on the second press).
   if (e.key === 'Escape' && game.screen === 'playing') {
     if (showHelp) {
       showHelp = false;
+      setPaused(false);
+    } else if (isPaused) {
       setPaused(false);
     } else {
       showHelp = true;
@@ -3014,6 +3131,7 @@ window.addEventListener('keydown', (e) => {
   // Wet Fart - Q (left) / E (right)
   if ((e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E') && game.screen === 'playing') {
     e.preventDefault();
+    if (e.repeat) return; // holding the key must not auto-drain charges
     if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
       wetFartCharges--;
       wetFartPendingDir = (e.key === 'q' || e.key === 'Q') ? -1 : 1;
@@ -3022,27 +3140,37 @@ window.addEventListener('keydown', (e) => {
       if (speechBubbles.length < 3) {
         speechBubbles.push({ x: player.x, y: player.y - 80, text: 'Auu, usrah se! 💦', timer: 2.0, maxTimer: 2.0 });
       }
+    } else if (wetFartCharges <= 0 && performance.now() - lastEmptyPopupAt > 800) {
+      // Feedback instead of a silent dead key
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema vlažnih prdeža! Kupi u shopu \u{1F4B0}', '#ff4444');
     }
     return;
   }
 
-  keys[e.key] = true;
+  keys[gk] = true;
 
-  // Jump (only when grounded and no latched devil)
-  if (e.key === 'ArrowUp' && game.screen === 'playing' && player.grounded && !game.latchedDevil) {
-    player.vy = player.jumpForce;
-    player.grounded = false;
+  // Jump (only when grounded and no latched devil). A press just before
+  // landing is buffered for ~0.12s and fires on touchdown.
+  if (gk === 'ArrowUp' && !e.repeat && game.screen === 'playing' && !game.latchedDevil) {
+    if (player.grounded) {
+      player.vy = player.jumpForce;
+      player.grounded = false;
+    } else {
+      jumpBufferTimer = 0.12;
+    }
   }
 
-  // Shake detection when devil is latched
+  // Shake detection when devil is latched (!e.repeat: OS auto-repeat of a held
+  // key must not double the shake progress of the other, tapped key)
   if (game.latchedDevil && game.screen === 'playing') {
-    if (e.key === 'ArrowUp' && lastShakeKey !== 'up') {
+    if (gk === 'ArrowUp' && !e.repeat && lastShakeKey !== 'up') {
       game.latchedDevil.shakeProgress++;
       lastShakeKey = 'up';
       shakeVisualOffset = -5;
       shakeVisualTimer = 0.08;
       playShakeSound();
-    } else if (e.key === 'ArrowDown' && lastShakeKey !== 'down') {
+    } else if (gk === 'ArrowDown' && !e.repeat && lastShakeKey !== 'down') {
       game.latchedDevil.shakeProgress++;
       lastShakeKey = 'down';
       shakeVisualOffset = 5;
@@ -3052,7 +3180,7 @@ window.addEventListener('keydown', (e) => {
   }
 
   // SUMMON HOUSE from collected materials with K
-  if ((e.key === 'k' || e.key === 'K') && game.screen === 'playing' && houses.length === 0) {
+  if ((e.key === 'k' || e.key === 'K') && !e.repeat && game.screen === 'playing' && houses.length === 0) {
     // Pick best house player can afford from materials
     if (materials.bricks >= 10) {
       buildHouse('brick');
@@ -3069,6 +3197,16 @@ window.addEventListener('keydown', (e) => {
 
   // Fart mechanic - SPACE during gameplay (not while in house)
   if (e.key === ' ' && game.screen === 'playing') {
+    if (e.repeat) {
+      // Holding SPACE must not drain the limited fart charges by itself
+      e.preventDefault();
+      return;
+    }
+    if (fartCharges <= 0 && !player.inHouse && performance.now() - lastEmptyPopupAt > 800) {
+      // Feedback instead of a silent dead key
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema prdeža! Jedi \u{1F33D}', '#ff4444');
+    }
     if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5; // half second cooldown
@@ -3145,11 +3283,21 @@ window.addEventListener('keydown', (e) => {
 });
 
 // Click/touch on canvas also starts/restarts game (and unlocks audio!)
-canvas.addEventListener('click', () => {
+canvas.addEventListener('click', (e) => {
   if (game.screen === 'nameInput') return;
   const wasUnlocked = audioUnlocked;
   unlockAudio();
   if (game.screen === 'intro') {
+    // "Preskoči sve" corner button skips the whole cutscene with one tap
+    const cr = canvas.getBoundingClientRect();
+    const ccx = (e.clientX - cr.left) * WIDTH / cr.width;
+    const ccy = (e.clientY - cr.top) * HEIGHT / cr.height;
+    if (ccx < 280 && ccy > HEIGHT - 50) {
+      stopIntroMusic();
+      game.screen = 'title';
+      introScene = 0;
+      return;
+    }
     // First click on any scene: just unlock audio and start music, don't advance
     if (!wasUnlocked) {
       forceRestartIntroMusic();
@@ -3193,6 +3341,8 @@ canvas.addEventListener('click', () => {
 
 window.addEventListener('keyup', (e) => {
   keys[e.key] = false;
+  const gk = KEY_ALIAS[e.key];
+  if (gk) keys[gk] = false;
 });
 
 // --- Mobile Touch Controls ---
@@ -3207,8 +3357,23 @@ const activeTouches = {};
 function simulateKeyDown(keyName) {
   // Don't process gameplay keys while paused
   if (isPaused) return;
-  // Simulate the same keydown event the keyboard handler uses
-  const fakeEvent = { key: keyName, preventDefault: () => {} };
+
+  // Wet fart on Q/E (mirrors the keyboard handler, incl. the in-house rule)
+  if ((keyName === 'q' || keyName === 'e') && game.screen === 'playing') {
+    if (wetFartCharges > 0 && wetFartInflateTimer <= 0 && !player.inHouse) {
+      wetFartCharges--;
+      wetFartPendingDir = keyName === 'q' ? -1 : 1;
+      wetFartInflateTimer = 0.6;
+      if (speechBubbles.length < 3) {
+        speechBubbles.push({ x: player.x, y: player.y - 80, text: 'Auu, usrah se! 💦', timer: 2.0, maxTimer: 2.0 });
+      }
+    } else if (wetFartCharges <= 0 && performance.now() - lastEmptyPopupAt > 800) {
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema vlažnih prdeža! Kupi u shopu \u{1F4B0}', '#ff4444');
+    }
+    return;
+  }
+
   // Set key state
   keys[keyName] = true;
 
@@ -3245,6 +3410,10 @@ function simulateKeyDown(keyName) {
 
   // Handle fart on space (same rules as keyboard: not while in house)
   if (keyName === ' ' && game.screen === 'playing') {
+    if (fartCharges <= 0 && !player.inHouse && performance.now() - lastEmptyPopupAt > 800) {
+      lastEmptyPopupAt = performance.now();
+      spawnScorePopup(player.x, player.y - 40, 'Nema prdeža! Jedi \u{1F33D}', '#ff4444');
+    }
     if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5;
@@ -3327,7 +3496,7 @@ const DIR_Y = Math.floor((HEIGHT - DIR_H) / 2);
 const JUMP_H = 100;
 const JUMP_Y = DIR_Y + DIR_H + GAP;
 
-// SERI (poop) - above DESNO, same width as DESNO
+// KU\u0106A - above LEVO (rare action, safe at the top)
 const POOP_H = 100;
 const POOP_Y = DIR_Y - GAP - POOP_H;
 
@@ -3335,8 +3504,17 @@ const POOP_Y = DIR_Y - GAP - POOP_H;
 const FART_H = 100;
 const FART_Y = DIR_Y + DIR_H + GAP;
 
+// SERI - at the BOTTOM of the right stack (a held thumb at the old top-right
+// position covered the area where falling bombs/coins need to be judged)
+const SERI_Y = FART_Y + FART_H + GAP;
+
+// Vla\u017Eni prde\u017E - pair of half-width zones below SKOK (Q = left, E = right)
+const WF_W = Math.floor((DIR_W - 6) / 2);
+const WF_Y = JUMP_Y + JUMP_H + GAP;
+const WF_H = 100;
+
 const mobileZones = [
-  // KU\u0106A - above LEVO (mirrors SERI above DESNO); builds a house from materials
+  // KU\u0106A - above LEVO; builds a house from materials
   { id: 'house', key: 'k', icon: '\uD83C\uDFE0', label: 'KU\u0106A',
     color: 'rgba(255,150,80,',
     x: PAD, y: POOP_Y, w: DIR_W, h: POOP_H },
@@ -3348,10 +3526,17 @@ const mobileZones = [
   { id: 'jump',  key: 'ArrowUp',    icon: '\u25B2\u25BC', label: 'SKOK',
     color: 'rgba(255,220,50,',
     x: PAD, y: JUMP_Y, w: DIR_W, h: JUMP_H },
-  // SERI - above DESNO
+  // Vla\u017Eni prde\u017E levo/desno - below SKOK
+  { id: 'wetLeft',  key: 'q', icon: '\u25C0\uD83D\uDCA6', label: 'MOKRI',
+    color: 'rgba(80,180,255,',
+    x: PAD, y: WF_Y, w: WF_W, h: WF_H },
+  { id: 'wetRight', key: 'e', icon: '\uD83D\uDCA6\u25B6', label: 'MOKRI',
+    color: 'rgba(80,180,255,',
+    x: PAD + WF_W + 6, y: WF_Y, w: WF_W, h: WF_H },
+  // SERI - below PRDNI (bottom of the right stack)
   { id: 'poop',  key: 'Shift',       icon: '\uD83D\uDCA9', label: 'SERI',
     color: 'rgba(136,102,0,',
-    x: WIDTH - PAD - DIR_W, y: POOP_Y, w: DIR_W, h: POOP_H },
+    x: WIDTH - PAD - DIR_W, y: SERI_Y, w: DIR_W, h: POOP_H },
   // DESNO
   { id: 'right', key: 'ArrowRight', icon: '\u25B6', label: 'DESNO',
     color: 'rgba(100,150,255,',
@@ -3404,12 +3589,10 @@ function activateZone(zone) {
   if (zone.id === 'jump') {
     if (game.latchedDevil) {
       // Devil/butcher latched: rapid shake (alternate up/down)
-      if (!shakeZoneHeld) {
-        shakeZoneHeld = true;
-        shakeToggle = false;
-        doShakeTick();
-        shakeRepeatTimer = setInterval(doShakeTick, 120);
-      }
+      startTouchShake();
+    } else if (game.screen === 'playing' && !player.grounded && !isPaused) {
+      // Second press while airborne = fast slam down (the ▼ half of the icon)
+      keys['ArrowDown'] = true;
     } else {
       // Normal jump
       simulateKeyDown('ArrowUp');
@@ -3421,8 +3604,31 @@ function activateZone(zone) {
   }
 }
 
+// Enter shake mode for the held SKOK zone (also called from the game loop when
+// a devil latches while the zone is ALREADY held - otherwise the held button
+// would silently do nothing and the player wouldn't know why)
+function startTouchShake() {
+  if (shakeZoneHeld) return;
+  shakeZoneHeld = true;
+  shakeToggle = false;
+  simulateKeyUp('ArrowUp');
+  simulateKeyUp('ArrowDown');
+  doShakeTick();
+  if (shakeRepeatTimer) clearInterval(shakeRepeatTimer);
+  shakeRepeatTimer = setInterval(doShakeTick, 120);
+}
+
 function doShakeTick() {
   if (!shakeZoneHeld) return;
+  if (!game.latchedDevil) {
+    // Devil shaken off while the zone is still held: stop the shake loop so it
+    // doesn't keep triggering phantom jumps
+    shakeZoneHeld = false;
+    if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+    simulateKeyUp('ArrowUp');
+    simulateKeyUp('ArrowDown');
+    return;
+  }
   const k = shakeToggle ? 'ArrowDown' : 'ArrowUp';
   const kOther = shakeToggle ? 'ArrowUp' : 'ArrowDown';
   simulateKeyUp(kOther);
@@ -3504,6 +3710,16 @@ canvas.addEventListener('touchmove', (e) => {
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
 
+  // Tap anywhere on a paused game resumes it (mobile has no P/ESC keys)
+  if (game.screen === 'playing' && isPaused) {
+    for (const touch of e.changedTouches) {
+      delete canvasTouches[touch.identifier];
+    }
+    recalcZonesFromTouches();
+    togglePause();
+    return;
+  }
+
   // Non-playing screens: tap = click to advance
   if (game.screen !== 'playing') {
     // Pass real touch coordinates into the synthetic click event
@@ -3537,23 +3753,73 @@ canvas.addEventListener('touchcancel', (e) => {
   recalcZonesFromTouches();
 }, { passive: false });
 
+// --- Stuck-input protection + auto-pause on focus loss ---
+// keyup/touchend events go to another app when the window loses focus (Alt+Tab,
+// notification, OS dialog): release everything so the pig doesn't run into a
+// wall forever, and pause so the game politely waits for the player.
+function releaseAllInputs() {
+  for (const k in keys) keys[k] = false;
+  for (const tid in canvasTouches) delete canvasTouches[tid];
+  for (const zid in activeZones) delete activeZones[zid];
+  shakeZoneHeld = false;
+  if (shakeRepeatTimer) { clearInterval(shakeRepeatTimer); shakeRepeatTimer = null; }
+}
+function onFocusLost() {
+  releaseAllInputs();
+  if (game.screen === 'playing' && !isPaused) setPaused(true);
+}
+window.addEventListener('blur', onFocusLost);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) onFocusLost();
+});
+
 // --- Draw Mobile Touch Zones on Canvas (gamepad-style buttons) ---
+// Can a house be built right now? (used for the pulsing KUĆA button + HUD hint)
+function canBuildHouse() {
+  return houses.length === 0 &&
+    (materials.bricks >= 10 || materials.logs >= 7 || materials.straw >= 5);
+}
+
 function drawMobileTouchZones() {
   if (!isMobile) return;
   const zones = getZoneRects();
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 250));
 
   for (const z of zones) {
     const isActive = !!activeZones[z.id];
 
+    // Contextual state: icon/label/color adapt to what the button can do NOW
+    let icon = z.icon, label = z.label, color = z.color;
+    let disabled = false, highlight = false;
+    if (z.id === 'jump' && game.latchedDevil) {
+      icon = '↕';
+      label = 'TRESI!';
+      color = 'rgba(255,60,60,';
+      highlight = true;
+    } else if (z.id === 'fart') {
+      label = 'PRDNI x' + fartCharges;
+      disabled = fartCharges <= 0;
+    } else if (z.id === 'wetLeft' || z.id === 'wetRight') {
+      label = 'x' + wetFartCharges;
+      disabled = wetFartCharges <= 0;
+    } else if (z.id === 'house') {
+      const can = canBuildHouse();
+      disabled = !can;
+      highlight = can;
+      if (houses.length > 0) label = 'IMAŠ';
+    }
+
+    const dim = disabled ? 0.45 : 1.0;
+
     // Rounded button background
-    ctx.fillStyle = z.color + (isActive ? '0.35)' : '0.12)');
+    ctx.fillStyle = color + ((isActive ? 0.35 : (highlight ? 0.10 + pulse * 0.15 : 0.12)) * dim + ')');
     ctx.beginPath();
     ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
     ctx.fill();
 
-    // Button border
-    ctx.strokeStyle = z.color + (isActive ? '0.8)' : '0.3)');
-    ctx.lineWidth = 2;
+    // Button border (pulses when the button begs to be pressed)
+    ctx.strokeStyle = color + ((isActive ? 0.8 : (highlight ? 0.4 + pulse * 0.5 : 0.3)) * dim + ')');
+    ctx.lineWidth = highlight ? 3 : 2;
     ctx.beginPath();
     ctx.roundRect(z.x, z.y, z.w, z.h, BTN_R);
     ctx.stroke();
@@ -3567,18 +3833,18 @@ function drawMobileTouchZones() {
     }
 
     // Icon
-    ctx.globalAlpha = isActive ? 0.9 : 0.4;
+    ctx.globalAlpha = (isActive ? 0.9 : (highlight ? 0.3 + pulse * 0.5 : 0.4)) * (disabled ? 0.5 : 1);
     ctx.font = '40px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.icon, z.x + z.w / 2, z.y + z.h * 0.4);
+    ctx.fillText(icon, z.x + z.w / 2, z.y + z.h * 0.4);
 
     // Label text below icon
     ctx.font = 'bold 14px sans-serif';
-    ctx.globalAlpha = isActive ? 0.7 : 0.25;
+    ctx.globalAlpha = (isActive ? 0.7 : (highlight ? 0.3 + pulse * 0.4 : 0.25)) * (disabled ? 0.6 : 1);
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.label, z.x + z.w / 2, z.y + z.h * 0.75);
+    ctx.fillText(label, z.x + z.w / 2, z.y + z.h * 0.75);
 
     ctx.globalAlpha = 1.0;
   }
@@ -4405,6 +4671,16 @@ function update(dt) {
     player.y = player.groundY;
   }
 
+  // Buffered jump: a press made just before landing fires on touchdown
+  if (jumpBufferTimer > 0) {
+    jumpBufferTimer -= dt;
+    if (player.grounded && !game.latchedDevil) {
+      player.vy = player.jumpForce;
+      player.grounded = false;
+      jumpBufferTimer = 0;
+    }
+  }
+
   // --- House Entry/Exit ---
   if (player.grounded) {
     if (player.inHouse) {
@@ -4752,6 +5028,7 @@ function update(dt) {
         spawnParticles(player.x, player.y - 30, '\u2B50', 1, 180);
       }
       playShakeSuccess();
+      if (navigator.vibrate) navigator.vibrate([30, 50, 30]); // haptic: shaken off!
 
       game.latchedDevil = null;
       lastShakeKey = null;
@@ -4895,6 +5172,7 @@ function update(dt) {
           squealTimer = 0;
           shakeHintTimer = 0;
           playDevilLatch();
+          if (navigator.vibrate) navigator.vibrate(80); // haptic: something grabbed you!
           // Show devil type indicator
           const dt = obj.devilType || 'fast';
           if (dt === 'fast') {
@@ -4934,6 +5212,7 @@ function update(dt) {
           squealTimer = 0;
           shakeHintTimer = 0;
           playButcherLatch();
+          if (navigator.vibrate) navigator.vibrate(80); // haptic: something grabbed you!
           devilTypeIndicator = { text: '\u{1F52A} KASAPIN!', color: '#cc0000', timer: 2.0 };
           objects.splice(i, 1);
         } else {
@@ -7090,10 +7369,14 @@ function drawHUD() {
   const fartFont = mHud ? '28px sans-serif' : '20px sans-serif';
   const btcFont = mHud ? 'bold 20px sans-serif' : 'bold 14px sans-serif';
 
+  // Left inset on mobile: the fixed ⏸/❓ DOM buttons sit over the canvas'
+  // top-left corner, so the HUD moves right to stay readable/tappable
+  const hudL = mHud ? 75 : 0;
+
   // Top-left: Score with bouncing coin icon
   const coinBounce = Math.sin(Math.max(0, scoreBounceFactor) * Math.PI) * 5;
-  hudText('\u{1FA99}', 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
-  hudText(' Score: ' + game.score, mHud ? 48 : 38, 14, scoreFont, '#fff', 'left');
+  hudText('\u{1FA99}', hudL + 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
+  hudText(' Score: ' + game.score, hudL + (mHud ? 48 : 38), 14, scoreFont, '#fff', 'left');
 
   // Top-center: Level with rounded background
   ctx.textAlign = 'center';
@@ -7144,10 +7427,11 @@ function drawHUD() {
     hudText(Math.ceil(game.levelTimer) + 's', WIDTH / 2, mHud ? 58 : 54, timerFont, 'rgba(255,255,255,0.8)', 'center');
   }
 
-  // Top-right: Crack indicator with piggy icons
+  // Top-right: Crack indicator with piggy icons (inset on mobile so the fixed
+  // fullscreen button doesn't cover the last life)
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
-  const crackStartX = WIDTH - 15;
+  const crackStartX = mHud ? WIDTH - 95 : WIDTH - 15;
   ctx.font = lifeFont;
   const crackSpacing = mHud ? 36 : 28;
   const maxCr = game.maxCracks || 3;
@@ -7171,9 +7455,9 @@ function drawHUD() {
 
   // Fart meter (below score)
   const fartY = mHud ? 56 : 48;
-  hudText('\u{1F4A8} ', 15, fartY, fartFont, '#88cc44', 'left');
+  hudText('\u{1F4A8} ', hudL + 15, fartY, fartFont, '#88cc44', 'left');
   for (let i = 0; i < MAX_FARTS; i++) {
-    const fx = 42 + i * 22;
+    const fx = hudL + 42 + i * 22;
     if (i < fartCharges) {
       // Full charge - green cloud
       ctx.fillStyle = '#66cc33';
@@ -7196,12 +7480,12 @@ function drawHUD() {
   if (fartCharges === 0) {
     const blink = Math.sin(Date.now() / 300) > 0;
     if (blink) {
-      hudText('Uhvati \u{1F33D}!', 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
+      hudText('Uhvati \u{1F33D}!', hudL + 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
   }
 
   // Wet fart charges display
-  const wfX = 180;
+  const wfX = hudL + 180;
   ctx.font = mHud ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -7218,24 +7502,34 @@ function drawHUD() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🌾 ' + materials.straw + '/5', 16, matY + 1);
+  ctx.fillText('🌾 ' + materials.straw + '/5', hudL + 16, matY + 1);
   ctx.fillStyle = '#DAA520';
-  ctx.fillText('🌾 ' + materials.straw + '/5', 15, matY);
+  ctx.fillText('🌾 ' + materials.straw + '/5', hudL + 15, matY);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🪵 ' + materials.logs + '/7', 86, matY + 1);
+  ctx.fillText('🪵 ' + materials.logs + '/7', hudL + 86, matY + 1);
   ctx.fillStyle = '#8B4513';
-  ctx.fillText('🪵 ' + materials.logs + '/7', 85, matY);
+  ctx.fillText('🪵 ' + materials.logs + '/7', hudL + 85, matY);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('🧱 ' + materials.bricks + '/10', 156, matY + 1);
+  ctx.fillText('🧱 ' + materials.bricks + '/10', hudL + 156, matY + 1);
   ctx.fillStyle = '#B22222';
-  ctx.fillText('🧱 ' + materials.bricks + '/10', 155, matY);
+  ctx.fillText('🧱 ' + materials.bricks + '/10', hudL + 155, matY);
   // House status indicator
   if (houses.length > 0) {
     const h = houses[0];
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 246, matY + 1);
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, hudL + 246, matY + 1);
     ctx.fillStyle = '#FFD700';
-    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, 245, matY);
+    ctx.fillText('🏠 ' + h.hp + '/' + h.maxHp, hudL + 245, matY);
+  } else if (canBuildHouse()) {
+    // Contextual hint: enough materials collected - teach the build action the
+    // moment it becomes possible
+    if (Math.sin(Date.now() / 250) > -0.3) {
+      ctx.font = mHud ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillText(mHud ? '🏠 KUĆA dugme!' : '[K] 🏠 Sagradi!', hudL + 246, matY + 1);
+      ctx.fillStyle = '#FFD700';
+      ctx.fillText(mHud ? '🏠 KUĆA dugme!' : '[K] 🏠 Sagradi!', hudL + 245, matY);
+    }
   }
 
   // Poop cooldown indicator
@@ -7264,9 +7558,9 @@ function drawHUD() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.fillText('\u20BF ' + playerBTC, 16, btcY + 1);
+  ctx.fillText('\u20BF ' + playerBTC, hudL + 16, btcY + 1);
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('\u20BF ' + playerBTC, 15, btcY);
+  ctx.fillText('\u20BF ' + playerBTC, hudL + 15, btcY);
 
   // Player name (top-right, below crack indicators)
   if (playerName) {
@@ -7274,9 +7568,9 @@ function drawHUD() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText(playerName, WIDTH - 16, 46);
+    ctx.fillText(playerName, crackStartX - 1, 46);
     ctx.fillStyle = '#aaa';
-    ctx.fillText(playerName, WIDTH - 15, 45);
+    ctx.fillText(playerName, crackStartX, 45);
   }
 
   // Active shield indicator
@@ -7284,7 +7578,7 @@ function drawHUD() {
     ctx.font = '18px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('\uD83D\uDEE1\uFE0F', 155, 73);
+    ctx.fillText('\uD83D\uDEE1\uFE0F', hudL + 155, 73);
   }
 }
 
@@ -7323,9 +7617,21 @@ function drawShop() {
     ctx.beginPath();
     ctx.roundRect(x, y, cardW, cardH, 10);
     ctx.fill();
-    ctx.strokeStyle = canBuy ? '#FFD700' : '#333';
-    ctx.lineWidth = 2;
+    // Gold flash right after a keyboard (digit) purchase
+    var flashing = shopFlashItem === item.id && performance.now() < shopFlashUntil;
+    ctx.strokeStyle = flashing ? '#fff' : (canBuy ? '#FFD700' : '#333');
+    ctx.lineWidth = flashing ? 5 : 2;
     ctx.stroke();
+
+    // Keyboard hint: digit key buys this card (desktop only)
+    if (!isMobile) {
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = canBuy ? '#FFD700' : '#555';
+      ctx.fillText('[' + (i + 1) + ']', x + 8, y + 6);
+      ctx.textBaseline = 'middle';
+    }
 
     // Icon
     ctx.font = `${isMobile ? 44 : 36}px sans-serif`;
@@ -7427,11 +7733,15 @@ function drawShop() {
   if (activeText === 'Aktivno: ') activeText += 'ni\u0161ta';
   ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
 
-  // ESC hint
+  // Help hint (mobile has no ESC key - point at the ? button instead)
   ctx.font = '13px sans-serif';
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.fillText('ESC - pravila i komande', WIDTH - 10, 15);
+  if (isMobile) {
+    ctx.fillText('❓ dugme - pravila i komande', WIDTH - 85, 15);
+  } else {
+    ctx.fillText('1-6 kupovina  ·  SPACE/ENTER dalje  ·  ESC pravila', WIDTH - 85, 15);
+  }
 }
 
 // Is a per-run shop item already active/maxed (buying again would waste BTC)?
@@ -7513,15 +7823,24 @@ function drawHelpScreen() {
 
   ctx.font = '16px sans-serif';
   ctx.fillStyle = '#fff';
-  const controls = [
-    ['\u2190 \u2192', 'Kretanje levo/desno'],
-    ['\u2191', 'Skok (preska\u010Duj neprijatelje)'],
+  const controls = isMobile ? [
+    ['\u25C0 \u25B6', 'Kretanje levo/desno'],
+    ['\u25B2\u25BC SKOK', 'Skok / dr\u017Ei za tresenje \u0111avola'],
+    ['\uD83D\uDCA8 PRDNI', 'Prde\u017E (gu\u0161i neprijatelje)'],
+    ['\uD83D\uDCA9 SERI', 'Kakanje (ubija po zemlji)'],
+    ['\uD83D\uDCA6 MOKRI', 'Vla\u017Eni prde\u017E levo/desno'],
+    ['\uD83C\uDFE0 KU\u0106A', 'Sagradi ku\u0107icu (5\uD83C\uDF3E/7\uD83E\uDEB5/10\uD83E\uDDF1)'],
+    ['\u23F8 / \u2753', 'Pauza / ovo uputstvo'],
+  ] : [
+    ['\u2190 \u2192 / A D', 'Kretanje levo/desno'],
+    ['\u2191 / W', 'Skok (preska\u010Duj neprijatelje)'],
     ['\u2191\u2193', 'Otresanje \u0111avola/kasapina (brzo)'],
     ['SPACE', 'Prde\u017E (\uD83D\uDCA8 gu\u0161i neprijatelje)'],
     ['SHIFT', 'Sranje (\uD83D\uDCA9 ubija po zemlji)'],
+    ['Q / E', 'Vla\u017Eni prde\u017E levo/desno (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
+    ['K', 'Sagradi ku\u0107icu (5\uD83C\uDF3E/7\uD83E\uDEB5/10\uD83E\uDDF1)'],
     ['ESC', 'Ovo uputstvo'],
     ['P', 'Pauza'],
-    ['Q / E', 'Vla\u017Eni prde\u017E levo/desno (\u{1F4A6}\u{1F4A8} pokosi sve!)'],
     ['CMD+P', '\uD83E\uDD2B Tajna \u0161ifra...'],
   ];
   for (const [key, desc] of controls) {
@@ -7587,7 +7906,7 @@ function drawHelpScreen() {
   ctx.globalAlpha = pulse;
   ctx.font = 'bold 18px sans-serif';
   ctx.fillStyle = '#FFD700';
-  ctx.fillText('Pritisni ESC za nastavak', WIDTH / 2, y);
+  ctx.fillText(isMobile ? 'Tapni bilo gde za nastavak' : 'Pritisni ESC za nastavak', WIDTH / 2, y);
   ctx.globalAlpha = 1;
 }
 
@@ -7646,27 +7965,43 @@ function drawPauseMenu() {
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.strokeRect(50, 80, WIDTH - 100, HEIGHT - 130);
 
-  ctx.font = '16px sans-serif';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
 
-  const rules = [
+  // Controls column - keyboard players get keys, touch players get button names
+  const controlRules = isMobile ? [
+    '\u{1F3AE} KONTROLE (dodir):',
+    '  \u25C0 \u25B6 LEVO/DESNO - kretanje',
+    '  \u25B2\u25BC SKOK - skok / dr\u017Ei za tresenje \u0111avola',
+    '  \u{1F4A8} PRDNI - prde\u017E (gasi \u0111avole u vazduhu)',
+    '  \u{1F4A9} SERI - kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  \u{1F4A6} MOKRI - vla\u017Eni prde\u017E levo/desno',
+    '  \u{1F3E0} KU\u0106A - sagradi ku\u0107icu (5\u{1F33E} / 7\u{1FAB5} / 10\u{1F9F1})',
+  ] : [
     '\u{1F3AE} KONTROLE:',
-    '  \u2190 \u2192  Kretanje levo/desno',
-    '  \u2191     Skok',
-    '  \u2193     Brzo prizemljenje (u vazduhu) / Tresenje (\u0111avo na le\u0111ima)',
+    '  \u2190 \u2192 / A D  Kretanje levo/desno',
+    '  \u2191 / W  Skok (\u2191\u2193 tresenje kad se \u0111avo zaka\u010Di)',
+    '  \u2193 / S  Brzo prizemljenje (u vazduhu)',
     '  SPACE  Prde\u017E (gasi \u0111avole u vazduhu)',
-    '  \u2190 + \u2192  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  SHIFT  Kakanje (ostavlja \u{1F4A9} zamku na tlu)',
+    '  Q / E  Vla\u017Eni prde\u017E levo/desno \u{1F4A6}\u{1F4A8}',
+    '  K      Sagradi ku\u0107icu (5\u{1F33E} / 7\u{1FAB5} / 10\u{1F9F1})',
     '  P/ESC  Pauza',
+  ];
+
+  const leftRules = controlRules.concat([
     '',
     '\u{1F4B0} SAKUPLJAJ:',
-    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (3)  \u{1F947} Zlatni (5)',
-    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)  \u{1F33D} Kukuruz (puni prde\u017Ee)',
+    '  \u{1F949} Bronzani (1)  \u{1F948} Srebrni (5)  \u{1F947} Zlatni (10)',
+    '  \u{1F4B5} Nov\u010Danica (20)  \u{1F4B0} Vre\u0107a zlata (30)',
+    '  \u{1F33D} Kukuruz (puni prde\u017Ee)  \u{1F33E}\u{1FAB5}\u{1F9F1} Materijali',
     '',
     '\u26A0\uFE0F IZBEGAVAJ:',
     '  \u{1F4A3} Bombe - eksplodiraju',
-    '  \u26A1 Munje - od nivoa 4 (upozorenje: \u017Euti blesak na oblaku)',
-    '',
+    '  \u26A1 Munje - od nivoa 4 (\u017Euti blesak = upozorenje)',
+  ]);
+
+  const rightRules = [
     '\u{1F47F} NEPRIJATELJI KOJI PADAJU:',
     '  \u{1F608} \u0110avo brzi - tresi gore/dole da ga skine\u0161',
     '  \u{1F47F} \u0110avo te\u0161ki - sporiji ali tra\u017Ei vi\u0161e tresenja',
@@ -7681,22 +8016,27 @@ function drawPauseMenu() {
     '',
     '\u{1F33F} SAVEZNICI:',
     '  \u{1F9D1}\u200D\u{1F33E} Vegan - brani te od meso\u017Edera i farmera',
-    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne (ako ima\u0161 dovoljno para!)',
+    '  \u{1F47C} An\u0111eo - mo\u017Ee da te vaskrsne',
+    '     (ako ima\u0161 dovoljno para!)',
   ];
 
-  let y = 105;
-  for (const line of rules) {
-    if (line.startsWith('\u{1F3AE}') || line.startsWith('\u{1F4B0}') || line.startsWith('\u26A0') ||
-        line.startsWith('\u{1F47F}') || line.startsWith('\u{1F43A}') || line.startsWith('\u{1F33F}')) {
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillStyle = '#FFD700';
-    } else {
-      ctx.font = '14px sans-serif';
-      ctx.fillStyle = '#ddd';
+  // Two columns so everything fits inside the box (80..HEIGHT-50)
+  function drawRulesColumn(lines, x) {
+    let y = 105;
+    for (const line of lines) {
+      if (/^\S/.test(line) && line !== '') {
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillStyle = '#FFD700';
+      } else {
+        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#ddd';
+      }
+      ctx.fillText(line, x, y);
+      y += line === '' ? 10 : 19;
     }
-    ctx.fillText(line, 70, y);
-    y += line === '' ? 8 : 18;
   }
+  drawRulesColumn(leftRules, 70);
+  drawRulesColumn(rightRules, WIDTH / 2 + 30);
 
   // Resume hint
   ctx.font = 'bold 20px sans-serif';
@@ -7704,7 +8044,7 @@ function drawPauseMenu() {
   ctx.fillStyle = '#4CAF50';
   const pulse = Math.sin(Date.now() / 400) * 0.2 + 0.8;
   ctx.globalAlpha = pulse;
-  ctx.fillText('Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
+  ctx.fillText(isMobile ? '\u25B6 Tapni bilo gde za nastavak' : 'Pritisni P ili ESC za nastavak', WIDTH / 2, HEIGHT - 25);
   ctx.globalAlpha = 1;
 }
 
@@ -9015,9 +9355,22 @@ function drawIntroScene5(t) {
   ctx.restore();
 
   // Tutorial entries with staggered slide-in
-  const entries = [
-    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno' },
-    { icon: '\u2B06', text: 'Skok' },
+  // (touch players see the on-screen button names, not keyboard keys)
+  const entries = isMobile ? [
+    { icon: '\u25C0 \u25B6', text: 'Kretanje levo-desno' },
+    { icon: '\u25B2\u25BC', text: 'SKOK - skok / dr\u017Ei za tresenje \u0111avola' },
+    { icon: '\u{1F4A8}', text: 'PRDNI - prde\u017E oblak (gasi \u0111avole!)' },
+    { icon: '\u{1F4A6}', text: 'MOKRI - vla\u017Eni prde\u017E levo/desno' },
+    { icon: '\u{1F4A9}', text: 'SERI - kakanje (zamka za neprijatelje)' },
+    { icon: '\u{1F3E0}', text: 'KU\u0106A - gradi ku\u0107u od materijala!' },
+    { icon: '', text: '' },
+    { icon: '\u{1FA99}\u{1F4B5}\u{1F4B0}', text: 'Hvataj nov\u010Di\u0107e i nov\u010Danice!' },
+    { icon: '\u{1F4A3}\u26A1', text: 'Izbegavaj bombe i munje!' },
+    { icon: '\u{1F43A}\u{1F98A}\u{1F52A}', text: 'Neprijatelji: presko\u010Di ili ubij!' },
+    { icon: '\u{1F9F2}\u26A1\u{1F47B}\u2744\uFE0F', text: 'Power-upi: magnet, turbo, freeze...' },
+  ] : [
+    { icon: '\u2B05 \u27A1', text: 'Kretanje levo-desno (ili A / D)' },
+    { icon: '\u2B06', text: 'Skok (ili W)' },
     { icon: '\u2B07', text: 'Brzo sletanje / Otresi \u0111avole' },
     { icon: 'SPACE', text: 'Prde\u017E oblak \u{1F4A8} (gasi \u0111avole!)' },
     { icon: 'Q / E', text: 'Vla\u017Eni prde\u017E \u{1F4A6}\u{1F4A8} levo/desno' },
@@ -9231,7 +9584,19 @@ function drawIntro() {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = '#fff';
-    ctx.fillText('SPACE \u25B6', WIDTH - 20, HEIGHT - 10);
+    ctx.fillText(isMobile ? 'Tapni \u25B6' : 'SPACE \u25B6', WIDTH - 20, HEIGHT - 10);
+    ctx.globalAlpha = 1.0;
+  }
+
+  // "Skip everything" button at bottom-left (tap/click target checked in the
+  // canvas click handler; ESC does the same on keyboard)
+  if (audioUnlocked) {
+    ctx.globalAlpha = 0.6;
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('\u23ED Presko\u010Di sve' + (isMobile ? '' : ' (ESC)'), 20, HEIGHT - 10);
     ctx.globalAlpha = 1.0;
   }
 
@@ -11379,13 +11744,26 @@ function gameLoop(timestamp) {
 
   // Show/hide mobile controls based on game state
   const pauseBtnEl = document.getElementById('pauseBtn');
+  const helpBtnEl = document.getElementById('helpBtn');
   if (isMobile) {
     // DOM touch buttons are always hidden - canvas zones replace them
     touchControlsEl.classList.remove('visible');
+    // Auto-pause while the phone is held in portrait (rotate overlay is up)
+    if (portraitBlocked && game.screen === 'playing' && !isPaused) {
+      setPaused(true);
+    }
     if (game.screen === 'playing') {
       pauseBtnEl.style.display = 'block';
+      helpBtnEl.style.display = 'block';
+      // If a devil latches while the SKOK zone is ALREADY held, convert the
+      // held zone into shake mode (a press-time-only decision would leave the
+      // held button doing nothing)
+      if (game.latchedDevil && activeZones['jump'] && !shakeZoneHeld && !isPaused) {
+        startTouchShake();
+      }
     } else {
       pauseBtnEl.style.display = 'none';
+      helpBtnEl.style.display = game.screen === 'shop' ? 'block' : 'none';
       // Release all keys when leaving playing state
       Object.keys(keys).forEach(k => keys[k] = false);
       // Clear canvas touch state
