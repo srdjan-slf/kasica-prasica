@@ -452,8 +452,10 @@ function getLevelConfig(level) {
     billChance = 0.28;
     goldChance = 0.14;
   } else {
-    // Level 8+: Gets progressively brutal
-    duration = 45 + level * 3;
+    // Level 8+: Gets progressively brutal.
+    // Keep late levels SHORT and intense (was 45+level*3 = a 69s slog at L8):
+    // denser danger already raises difficulty, longer duration just adds fatigue.
+    duration = Math.min(60, 40 + level * 2);
     fallSpeed = Math.min(414, Math.round((234 + (level - 7) * 23) * 1.15));
     spawnRate = Math.max(0.13, (0.27 - (level - 7) * 0.025) * 0.85);
     devilCount = Math.min(24, 14 + (level - 7) * 3);
@@ -583,13 +585,14 @@ let enemyIntroActive = null; // { icon, name, desc, timer, alpha }
 const ENEMY_INTROS = {
   devil_fast: { icon: '\u{1F608}', name: 'BRZI \u0110AVO', desc: 'Leti brzo i ka\u010Di se za kasicu! Tresenje: \u2191\u2193' },
   devil_heavy: { icon: '\u{1F47F}', name: 'TE\u0160KI \u0110AVO', desc: 'Spor ali jak! Treba vi\u0161e tresenja!' },
-  devil_thief: { icon: '\u{1F608}', name: '\u0110AVO LOPOV', desc: 'Krade nov\u010Di\u0107e kad se zaka\u010Di!' },
-  butcher: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'No\u017Eevima skida srca! Otresi ga brzo!' },
+  devil_thief: { icon: '\u{1F479}', name: '\u0110AVO LOPOV', desc: 'Krade nov\u010Di\u0107e kad se zaka\u010Di!' },
+  butcher: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'Jak i uporan! Otresi ga pre nego \u0161to zamahne no\u017Eem!' },
+  butcher_ground: { icon: '\u{1F52A}', name: 'KASAPIN', desc: 'Juri te s no\u017Eem po zemlji! Presko\u010Di ga!' },
   wolf: { icon: '\u{1F43A}', name: 'VUK', desc: 'Tr\u010Di po zemlji! Presko\u010Di ga ili se sakrij u ku\u0107u!' },
   fox: { icon: '\u{1F98A}', name: 'LISICA', desc: 'Lukava i brza! Presko\u010Di je!' },
-  carnivore: { icon: '\u{1F356}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
+  carnivore: { icon: '\u{1F969}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
   farmer: { icon: '\u{1F468}\u200D\u{1F33E}', name: 'FARMER', desc: 'Hvata svinje za klanicu!' },
-  vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Brani te od meso\u017Edera! \u010Cuvaj ga!' },
+  vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Brani te od svih zveri! \u010Cuvaj ga!' },
   bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' },
   boss_velikiVuk: { icon: '\u{1F43A}', name: 'BOSS: VELIKI VUK', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}!' },
   boss_megaKasapin: { icon: '\u{1F52A}', name: 'BOSS: MEGA KASAPIN', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Beži od noževa!' },
@@ -667,7 +670,6 @@ let airplanes = [];
 
 // --- House Shelter System (Three Little Pigs) ---
 const houses = [];
-let houseSpawnTimer = 8; // first house spawns after 8 seconds
 
 const HOUSE_TYPES = {
   straw:  { name: 'Kuća od slame', hp: 2,  wallColor: '#DAA520', roofColor: '#F0E68C', wolfBlows: 1, emoji: '🌾' },
@@ -1091,7 +1093,7 @@ const BOSS_TYPES = {
   kraljDjavola: {
     name: 'KRALJ \u0110AVOLA',
     emoji: '\u{1F47F}',
-    hp: 32, maxHp: 32,
+    hp: 24, maxHp: 24,
     speed: 72,
     size: 110,
     attacks: ['fireball', 'teleport', 'summon', 'rain'],
@@ -2512,8 +2514,11 @@ function spawnObject() {
     return;
   }
 
-  // Corn for fart refill (only when farts < max)
-  if (fartCharges < MAX_FARTS && Math.random() < 0.06) {
+  // Corn for fart refill (only when farts < max).
+  // During a boss fight farts are the main weapon, so when the player is
+  // nearly empty corn comes much more often - no soft-locked boss levels.
+  const cornChance = (bossActive && fartCharges < 2) ? 0.25 : 0.06;
+  if (fartCharges < MAX_FARTS && Math.random() < cornChance) {
     const cornSize = 36;
     objects.push({
       type: 'corn',
@@ -2805,6 +2810,7 @@ function startLevel() {
       dir: 1,
       targetX: WIDTH / 2,
       stunTimer: 0,
+      hintTimer: 0,
       hitFlash: 0,
       phaseTwo: false, // below 50% hp
       deathTimer: 0,
@@ -2822,14 +2828,17 @@ function startLevel() {
   // Don't clear activePowerUps - let them carry over briefly
 
   // Calculate devil spawn schedule - start early, come in waves!
+  // Boss levels run 15s longer, so schedule across the REAL level time
+  // (otherwise the first half of a boss fight has no regular enemies at all)
+  const scheduleTime = cfg.duration + (bossKey ? 15 : 0);
   game.devilSchedule = [];
   if (cfg.devilCount > 0) {
-    const availableTime = cfg.duration - 3; // start after just 3 seconds
+    const availableTime = scheduleTime - 3; // start after just 3 seconds
     const interval = availableTime / (cfg.devilCount + 1);
     for (let i = 1; i <= cfg.devilCount; i++) {
       // Add some randomness so devils don't come perfectly evenly
       const jitter = (Math.random() - 0.5) * interval * 0.4;
-      const spawnAt = cfg.duration - (3 + interval * i) + jitter;
+      const spawnAt = scheduleTime - (3 + interval * i) + jitter;
       game.devilSchedule.push(Math.max(1, spawnAt));
     }
     game.devilSchedule.sort((a, b) => b - a); // sort descending (highest time first)
@@ -2840,11 +2849,11 @@ function startLevel() {
   if (game.level >= 2) {
     const butcherCount = Math.max(0, Math.floor(game.level / 2)); // 1 at level 2-3, 2 at level 4-5, etc.
     if (butcherCount > 0) {
-      const availableTime = cfg.duration - 8;
+      const availableTime = scheduleTime - 8;
       const interval = availableTime / (butcherCount + 1);
       for (let i = 1; i <= butcherCount; i++) {
         const jitter = (Math.random() - 0.5) * interval * 0.3;
-        const spawnAt = cfg.duration - (8 + interval * i) + jitter;
+        const spawnAt = scheduleTime - (8 + interval * i) + jitter;
         game.butcherSchedule.push(Math.max(2, spawnAt));
       }
       game.butcherSchedule.sort((a, b) => b - a);
@@ -2912,7 +2921,6 @@ function startLevel() {
   invulnTimer = 0;
   scoreBounceFactor = 0;
   houses.length = 0;
-  houseSpawnTimer = 8;
   player.inHouse = null;
   player.x = WIDTH / 2;
   player.y = player.groundY;
@@ -3032,7 +3040,6 @@ window.addEventListener('keydown', (e) => {
       game.latchedDevil = null;
       player.inHouse = null;
       houses.length = 0;
-      houseSpawnTimer = 8;
       piggyDamageTimer = 0;
       objects.length = 0;
       ejectedCoins.length = 0;
@@ -3949,6 +3956,7 @@ function updateBoss(dt) {
       boss.y = 60;
       boss.state = 'fighting';
       bossActive = true;
+      boss.hintTimer = 8; // teach the counterplay for the first seconds of the fight
       triggerEnemyIntro('boss_' + boss.type);
       spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u26A0\uFE0F BOSS: ' + boss.name + ' \u26A0\uFE0F', '#FF0000');
       triggerScreenShake(10, 0.5);
@@ -3975,6 +3983,8 @@ function updateBoss(dt) {
   }
 
   // Phase two at 50% hp
+  if (boss.hintTimer > 0) boss.hintTimer -= dt;
+
   if (!boss.phaseTwo && boss.hp <= boss.maxHp / 2) {
     boss.phaseTwo = true;
     boss.speed *= 1.4;
@@ -3995,8 +4005,10 @@ function updateBoss(dt) {
     if (boss.pendingSlamTimer <= 0) {
       boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
       triggerScreenShake(12, 0.5);
-      // Damage if player is near
-      if (Math.abs(boss.x - player.x) < 80) triggerDamage(false);
+      spawnParticles(boss.x, HEIGHT - 60, '\u{1F4A5}', 5, 120);
+      // Damage only if player is near, ON THE GROUND and visible -
+      // jumping over the slam is the intended counterplay
+      if (player.grounded && !hasPowerUp('invisibility') && Math.abs(boss.x - player.x) < 80) triggerDamage(false);
     }
   }
   if (boss.chargeResetTimer > 0) {
@@ -4049,13 +4061,6 @@ function updateBoss(dt) {
       wetFartProjectiles.splice(i, 1);
     }
   }
-  // Boss takes damage from poops (if it's near ground)
-  for (const poop of poops) {
-    if (boss.y > HEIGHT - 120 && Math.abs(poop.x - boss.x) < boss.size) {
-      damageBoss(1);
-      poop.life = 0;
-    }
-  }
 }
 
 function damageBoss(amount) {
@@ -4079,10 +4084,11 @@ function executeBossAttack(boss, attack) {
       boss.speed *= 2;
       // Reset handled in updateBoss (pauses with the game, dies with the boss)
       boss.chargeResetTimer = 1.5;
+      spawnScorePopup(boss.x, boss.y - 30, '⚡ JURIŠ!', '#FFAA00'); // telegraph
       break;
-    case 'howl': // Summon 2 wolves
+    case 'howl': // Summon 2 wolves - one from each side so they never stack
       for (let i = 0; i < 2; i++) {
-        const fromLeft = Math.random() > 0.5;
+        const fromLeft = i === 0;
         const wt = GROUND_ENEMY_TYPES.wolf;
         groundEnemies.push({
           type: 'wolf', emoji: wt.emoji,
@@ -4123,6 +4129,7 @@ function executeBossAttack(boss, attack) {
       boss.speed = 400;
       // Impact handled in updateBoss (never fires during pause/gameOver or after boss death)
       boss.pendingSlamTimer = 0.8;
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F3AF} SKOČI!', '#FF4444'); // telegraph: jump over it
       break;
     case 'fireball': // Fire projectile at player
       const dx = px - boss.x;
@@ -4359,7 +4366,6 @@ function update(dt) {
         game.latchedDevil = null;
         player.inHouse = null;
         houses.length = 0;
-        houseSpawnTimer = 8;
         // Clear the battlefield so the paid resurrection isn't instantly punished
         // by leftover bombs/projectiles (same cleanup as the Ctrl+P cheat)
         objects.length = 0;
@@ -4450,7 +4456,7 @@ function update(dt) {
     // Ground enemies speak
     if (groundEnemies.length > 0) {
       const e = groundEnemies[Math.floor(Math.random() * groundEnemies.length)];
-      spawnSpeechBubble(e.x, e.y, e.type);
+      spawnSpeechBubble(e.x, e.y, e.type === 'butcher_ground' ? 'butcher' : e.type);
     }
   }
   if (Math.random() < 0.004 && game.latchedDevil) {
@@ -4463,8 +4469,8 @@ function update(dt) {
   // Falling devils occasionally taunt
   if (Math.random() < 0.001) {
     for (const obj of objects) {
-      if (obj.type === 'devil' || obj.type === 'fast_devil' || obj.type === 'heavy_devil' || obj.type === 'thief_devil') {
-        spawnSpeechBubble(obj.x, obj.y, 'devil');
+      if (obj.type === 'devil' || obj.type === 'butcher') {
+        spawnSpeechBubble(obj.x, obj.y, obj.type === 'butcher' ? 'butcher' : 'devil');
         break;
       }
     }
@@ -4501,9 +4507,10 @@ function update(dt) {
       });
       spawnScorePopup(pu.x, pu.y - 20, POWER_UP_TYPES[pu.powerType].name + '!', POWER_UP_TYPES[pu.powerType].color);
       spawnParticles(pu.x, pu.y, POWER_UP_TYPES[pu.powerType].emoji, 5, 100);
-      // Freeze effect: stun all enemies
+      // Freeze effect: stun ALL enemies (ground, falling and boss), as promised
       if (pu.powerType === 'freeze') {
         for (const ge of groundEnemies) ge.frozen = 4;
+        if (boss && boss.state === 'fighting') boss.stunTimer = Math.max(boss.stunTimer, 4);
         triggerScreenShake(5, 0.3);
       }
       powerUpDrops.splice(i, 1);
@@ -4515,7 +4522,7 @@ function update(dt) {
   // Magnet effect: attract coins toward player
   if (hasPowerUp('magnet')) {
     for (const obj of objects) {
-      if (obj.type === 'coin' || obj.type === 'bill' || obj.type === 'moneybag' || obj.type === 'gold') {
+      if (obj.type === 'coin' || obj.type === 'special') {
         const dx = player.x - obj.x;
         const dy = player.y - obj.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -4760,7 +4767,6 @@ function update(dt) {
         stealTimer: 0,
         zigzagSpeed, zigzagFreq, zigzagPhase,
         zigzagTime: 0,
-        knifeTimer: 0,
         nameTimer: 3.5
       });
     }
@@ -5021,8 +5027,21 @@ function update(dt) {
         hitTimer: 0
       });
 
-      game.score = Math.max(0, game.score - 3);
-      spawnScorePopup(player.x, player.y - 50, '-3', '#ff4444');
+      // Reward a successful shake-off instead of punishing it: the player did
+      // exactly the right thing. Fast shakes earn a "perfect" BTC bonus and
+      // the thief spits back what he stole.
+      const perfectShake = devil.hammerTimer < devil.hammerTimeout * 0.5;
+      game.score += 5;
+      if (devil.devilType === 'thief') {
+        game.score += 5;
+        spawnScorePopup(player.x, player.y - 50, 'Vratio ukradeno! +10', '#44ff44');
+      } else {
+        spawnScorePopup(player.x, player.y - 50, '+5', '#44ff44');
+      }
+      if (perfectShake) {
+        playerBTC += 2;
+        spawnScorePopup(player.x, player.y - 72, 'SAVR\u0160ENO! +2 \u20BF', '#F7931A');
+      }
       // Sparkle particles for devil knock-off
       for (let i = 0; i < 5; i++) {
         spawnParticles(player.x, player.y - 30, '\u2B50', 1, 180);
@@ -5091,6 +5110,12 @@ function update(dt) {
   // Update falling objects
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
+    // Freeze power-up stops falling devils/butchers in mid-air too
+    // ("Zamrzni sve neprijatelje!" must include the flying ones)
+    if ((obj.type === 'devil' || obj.type === 'butcher') && !obj.flyAway && hasPowerUp('freeze')) {
+      if (Math.random() < 0.03) spawnParticles(obj.x, obj.y, '❄️', 1, 30);
+      continue;
+    }
     obj.y += obj.speed * dt;
 
     // Parachute detachment for butchers
@@ -5402,7 +5427,7 @@ function update(dt) {
         .filter(([_, t]) => game.level >= t.fromLevel);
       const [key, type] = available[Math.floor(Math.random() * available.length)];
       // Wolves spawn half as often, farmers/carnivores 40% less often
-      if (key === 'wolf' && Math.random() < 0.7) {
+      if (key === 'wolf' && Math.random() < 0.5) {
         groundEnemySpawnTimer = 0.5;
       } else if ((key === 'farmer' || key === 'carnivore') && Math.random() < 0.4) {
         groundEnemySpawnTimer = 0.8;
@@ -5431,6 +5456,15 @@ function update(dt) {
     const e = groundEnemies[i];
     e.animTimer += dt;
     e.nameTimer = Math.max(0, (e.nameTimer || 0) - dt);
+
+    // Freeze/stun check FIRST: a frozen wolf can't keep blowing a house down
+    // and a frozen enemy can't hurt the player
+    if (e.frozen > 0 || hasPowerUp('freeze')) {
+      if (e.frozen > 0) e.frozen -= dt;
+      e.blowTimer = 0;
+      if (Math.random() < 0.03) spawnParticles(e.x, e.y - 20, '❄️', 1, 30);
+      continue;
+    }
 
     // Wolf blowing at house mechanic
     if (e.blowingAtHouse) {
@@ -5484,36 +5518,30 @@ function update(dt) {
       }
     }
 
-    // Freeze/stun check
-    if (e.frozen > 0) {
-      e.frozen -= dt;
-    } else if (hasPowerUp('freeze')) {
-      // Don't move while freeze power-up is active
-    } else {
-      switch (e.ai) {
-        case 'straight':
+    // Movement AI (freeze handled above)
+    switch (e.ai) {
+      case 'straight':
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'chase':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
+      case 'cunning':
+        if (e.pauseTimer > 0) {
+          e.pauseTimer -= dt;
+        } else {
           e.x += e.speed * e.dir * dt;
-          break;
-        case 'chase':
-          e.dir = player.x > e.x ? 1 : -1;
-          e.x += e.speed * e.dir * dt;
-          break;
-        case 'cunning':
-          if (e.pauseTimer > 0) {
-            e.pauseTimer -= dt;
-          } else {
-            e.x += e.speed * e.dir * dt;
-            if (Math.random() < 0.005) {
-              e.pauseTimer = 0.3 + Math.random() * 0.5;
-              e.dir *= -1;
-            }
+          if (Math.random() < 0.005) {
+            e.pauseTimer = 0.3 + Math.random() * 0.5;
+            e.dir *= -1;
           }
-          break;
-        case 'relentless':
-          e.dir = player.x > e.x ? 1 : -1;
-          e.x += e.speed * e.dir * dt;
-          break;
-      }
+        }
+        break;
+      case 'relentless':
+        e.dir = player.x > e.x ? 1 : -1;
+        e.x += e.speed * e.dir * dt;
+        break;
     }
 
     // Remove if off-screen (only for straight runners, others stay)
@@ -5539,6 +5567,23 @@ function update(dt) {
         triggerDamage(false);
         groundEnemies.splice(i, 1);
         spawnParticles(player.x, player.y, '\u{1F4A5}', 4, 80);
+      }
+    }
+  }
+
+  // Anti-overlap separation: chase/relentless enemies converge on the same spot
+  // and visually merge into one sprite. Push close pairs apart so the player
+  // always sees exactly how many threats are in front of them.
+  for (let a = 0; a < groundEnemies.length; a++) {
+    for (let b = a + 1; b < groundEnemies.length; b++) {
+      const e1 = groundEnemies[a], e2 = groundEnemies[b];
+      if (e1.blowingAtHouse || e2.blowingAtHouse) continue;
+      const dx = e2.x - e1.x;
+      if (Math.abs(dx) < 40) {
+        const push = (40 - Math.abs(dx)) / 2;
+        const s = dx >= 0 ? 1 : -1;
+        e1.x = Math.max(-20, Math.min(WIDTH + 20, e1.x - s * push));
+        e2.x = Math.max(-20, Math.min(WIDTH + 20, e2.x + s * push));
       }
     }
   }
@@ -5682,9 +5727,18 @@ function update(dt) {
 
 function killVegan(cause) {
   if (!vegan) return;
-  const msg = cause === 'poop'
-    ? 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}'
-    : 'O ne, ubio si vegana! \u{1F607}';
+  // Blame the player only when the player actually did it (poop/wet fart);
+  // a vegan who dies fighting FOR you is a hero, not your victim.
+  let msg;
+  if (cause === 'poop') {
+    msg = 'O ne, USRAO si vegana! \u{1F4A9}\u{1F607}';
+  } else if (cause === 'wetfart') {
+    msg = 'O ne, uprskao si vegana! \u{1F4A6}\u{1F607}';
+  } else if (cause === 'enemy') {
+    msg = 'Vegan je herojski pao braneći te! \u{1F331}\u{1F607}';
+  } else {
+    msg = 'Vegana je pogodila nesreća! \u{1F622}';
+  }
   veganDeathAnim = {
     x: vegan.x, y: vegan.y,
     timer: 4.0,
@@ -7247,6 +7301,34 @@ function drawBoss() {
   ctx.fillText(boss.name, bx, barY - 8);
   ctx.lineWidth = 1;
 
+  // How-to-fight hint for the first seconds of the fight (kids don't guess
+  // that farts fly upward - tell them!)
+  if (boss.state === 'fighting' && boss.hintTimer > 0) {
+    const hintAlpha = Math.min(1, boss.hintTimer > 1 ? 0.5 + Math.sin(t * 5) * 0.3 : boss.hintTimer);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, hintAlpha);
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    const hintText = isMobile ? '\u{1F4A8} Prdni ga! (PRDNI / MOKRI dugme)' : '\u{1F4A8} Prdni ga! (SPACE ili Q/E)';
+    const hy = by + boss.size * 0.5 + 24;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(hintText, bx, hy);
+    ctx.fillStyle = '#AFFF6E';
+    ctx.fillText(hintText, bx, hy);
+    ctx.restore();
+  }
+
+  // Slam telegraph: warning marker on the ground where the hit will land
+  if (boss.state === 'fighting' && boss.pendingSlamTimer > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(t * 15) * 0.4;
+    ctx.font = '30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠️', bx, HEIGHT - 60);
+    ctx.restore();
+  }
+
   ctx.restore();
 }
 
@@ -7400,7 +7482,7 @@ function drawHUD() {
     const timerBarHeight = 10;
     const timerBarX = WIDTH / 2 - timerBarWidth / 2;
     const timerBarY = 40;
-    const timerFill = Math.max(0, game.levelTimer / game.levelConfig.duration);
+    const timerFill = Math.min(1, Math.max(0, game.levelTimer / (game.levelConfig.duration + (isBossLevel(game.level) ? 15 : 0))));
 
     ctx.fillStyle = '#333';
     ctx.beginPath();
