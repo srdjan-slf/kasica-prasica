@@ -604,7 +604,8 @@ const ENEMY_INTROS = {
   boss_velikiVuk: { icon: '\u{1F43A}', name: 'BOSS: VELIKI VUK', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}!' },
   boss_megaKasapin: { icon: '\u{1F52A}', name: 'BOSS: MEGA KASAPIN', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Beži od noževa!' },
   boss_kraljDjavola: { icon: '\u{1F47F}', name: 'BOSS: KRALJ ĐAVOLA', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Izbegavaj vatru!' },
-  boss_zloFarmer: { icon: '\u{1F468}‍\u{1F33E}', name: 'BOSS: ZLO FARMER', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Pazi na vile i zamke!' }
+  boss_zloFarmer: { icon: '\u{1F468}‍\u{1F33E}', name: 'BOSS: ZLO FARMER', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Pazi na vile i zamke!' },
+  boss_kraljKlanice: { icon: '\u{1F9CC}', name: 'FINALNI BOSS: KRALJ KLANICE', desc: 'Zna SVE napade! Gađaj ga prdežima \u{1F4A8}\u{1F4A6}, a kad se obruši - kakica \u{1F4A9} ga truje!' }
 };
 
 function triggerEnemyIntro(type) {
@@ -1111,13 +1112,26 @@ const BOSS_TYPES = {
   zloFarmer: {
     name: 'ZLO FARMER',
     emoji: '\u{1F468}\u200D\u{1F33E}',
-    hp: 16, maxHp: 16,
-    speed: 48,
+    hp: 28, maxHp: 28,
+    speed: 76,
     size: 85,
-    attacks: ['pitchfork', 'charge', 'trap'],
+    attacks: ['pitchfork', 'charge', 'trap', 'slam'],
     level: 9,
     color: '#4A3000',
-    reward: 30
+    reward: 45
+  },
+  kraljKlanice: {
+    // Final boss - one attack borrowed from every boss before him,
+    // so level 10 is the climax instead of a plain level
+    name: 'KRALJ KLANICE',
+    emoji: '\u{1F9CC}',
+    hp: 36, maxHp: 36,
+    speed: 78,
+    size: 120,
+    attacks: ['knives', 'fireball', 'slam', 'charge', 'rain'],
+    level: 10,
+    color: '#2B0A2E',
+    reward: 60
   }
 };
 
@@ -1126,6 +1140,7 @@ function getBossForLevel(level) {
   if (level === 5) return 'megaKasapin';
   if (level === 7) return 'kraljDjavola';
   if (level === 9) return 'zloFarmer';
+  if (level === 10) return 'kraljKlanice';
   return null;
 }
 
@@ -2825,11 +2840,20 @@ function startLevel() {
       deathTimer: 0,
       shakeTimer: 0,
       pendingSlamTimer: 0,
-      chargeResetTimer: 0
+      swoopWindup: 0,      // charge telegraph: boss flashes + marker before diving
+      swoopPhase: null,    // 'down' | 'up' - dive to the ground and back
+      swoopHit: false,     // contact damage applies once per dive
+      rainDrops: 0,        // game-time rain queue (never fires during pause)
+      rainTimer: 0,
+      lastAttack: null     // no same attack twice in a row
     };
     // Boss levels get extra time and extra wet farts
     game.levelTimer += 15;
     wetFartCharges = MAX_WET_FARTS;
+    // The boss is the star of his own fight: calm the regular chaos so the
+    // player can read boss attacks (cfg is a fresh object - safe to tweak)
+    cfg.bombChance *= 0.5;
+    cfg.devilCount = Math.ceil(cfg.devilCount * 0.6);
   }
 
   // Power-ups reset
@@ -2856,7 +2880,9 @@ function startLevel() {
   // Calculate butcher spawn schedule - butchers appear from level 2+
   game.butcherSchedule = [];
   if (game.level >= 2) {
-    const butcherCount = Math.max(0, Math.floor(game.level / 2)); // 1 at level 2-3, 2 at level 4-5, etc.
+    // 1 at level 2-3, 2 at level 4-5, etc.; halved on boss levels (focus on the boss)
+    let butcherCount = Math.max(0, Math.floor(game.level / 2));
+    if (bossKey) butcherCount = Math.ceil(butcherCount / 2);
     if (butcherCount > 0) {
       const availableTime = scheduleTime - 8;
       const interval = availableTime / (butcherCount + 1);
@@ -4001,6 +4027,30 @@ function updateBoss(dt) {
         spawnParticles(boss.x + (Math.random()-0.5)*80, boss.y + (Math.random()-0.5)*80, '\u{1F4A5}', 1, 200);
       }
       triggerScreenShake(15, 0.8);
+      // Victory spoils: patch one crack (a strategic breather before harder
+      // levels) and rain gold from where the boss fell - a reward you FEEL
+      if (game.cracks > 0) {
+        game.cracks--;
+        spawnScorePopup(WIDTH / 2, HEIGHT / 2 - 40, '\u{1F496} Kasica zakrpljena! -1 pukotina', '#FF88CC');
+      }
+      const goldType = COIN_TYPES[2];
+      const dropX = boss.x;
+      for (let i = 0; i < 12; i++) {
+        objects.push({
+          type: 'coin', coinType: goldType,
+          x: Math.max(30, Math.min(WIDTH - 30, dropX + (Math.random() - 0.5) * 360)),
+          y: -20 - i * 30,
+          width: 40, height: 40,
+          speed: 260 + Math.random() * 80,
+          emoji: null, value: goldType.value
+        });
+      }
+      // Final boss down -> head straight into the victory scene (short
+      // gold-lap instead of waiting out a long leftover timer)
+      if (boss.type === 'kraljKlanice') {
+        game.levelTimer = Math.min(game.levelTimer, 6);
+        spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u{1F3C6} POBEDA! \u{1F3C6}', '#FFD700');
+      }
       boss = null;
     }
     return;
@@ -4035,33 +4085,106 @@ function updateBoss(dt) {
       if (player.grounded && !hasPowerUp('invisibility') && Math.abs(boss.x - player.x) < 80) triggerDamage(false);
     }
   }
-  if (boss.chargeResetTimer > 0) {
-    boss.chargeResetTimer -= dt;
-    if (boss.chargeResetTimer <= 0) {
-      boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : boss.speed / 2;
+  // Game-time rain queue (replaces setTimeout: pauses with the game,
+  // dies with the boss, never ambushes the player on unpause)
+  if (boss.rainDrops > 0) {
+    boss.rainTimer -= dt;
+    if (boss.rainTimer <= 0) {
+      boss.rainTimer = 0.2;
+      boss.rainDrops--;
+      bossProjectiles.push({
+        x: Math.random() * WIDTH, y: -20,
+        vx: 0, vy: 200 + Math.random() * 100,
+        life: 3, emoji: '\u{1F525}', size: 20
+      });
     }
   }
 
-  // Movement AI
-  const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
-  if (Math.abs(boss.x - boss.targetX) > 10) {
-    boss.dir = boss.targetX > boss.x ? 1 : -1;
-    boss.x += moveSpeed * boss.dir * dt;
-  } else {
-    // Pick new target
-    if (Math.random() < 0.02) {
-      boss.targetX = 60 + Math.random() * (WIDTH - 120);
+  // Swoop charge: telegraphed dive to the ground through the player's
+  // position, then climb back up. Gives the fight vertical rhythm and a
+  // window where poop (SHIFT) becomes a real anti-boss weapon.
+  if (boss.swoopWindup > 0) {
+    boss.swoopWindup -= dt;
+    boss.targetX = player.x; // locks on while winding up - dodge AFTER the dive starts
+    if (boss.swoopWindup <= 0) {
+      boss.swoopPhase = 'down';
+      boss.swoopHit = false;
+    }
+  }
+  if (boss.swoopPhase) {
+    const diveSpeed = boss.phaseTwo ? 330 : 270;
+    if (Math.abs(boss.x - boss.targetX) > 8) {
+      boss.dir = boss.targetX > boss.x ? 1 : -1;
+      boss.x += boss.speed * 1.6 * boss.dir * dt;
+    }
+    if (boss.swoopPhase === 'down') {
+      boss.y += diveSpeed * dt;
+      if (boss.y >= HEIGHT - 100) {
+        boss.y = HEIGHT - 100;
+        boss.swoopPhase = 'up';
+        triggerScreenShake(6, 0.3);
+        spawnParticles(boss.x, HEIGHT - 50, '\u{1F4A8}', 5, 100);
+      }
+    } else {
+      boss.y -= diveSpeed * 0.75 * dt;
+      if (boss.y <= 60) {
+        boss.y = 60;
+        boss.swoopPhase = null;
+      }
+    }
+    // Contact damage: once per dive, jumping away is the counterplay
+    if (!boss.swoopHit && !hasPowerUp('invisibility') &&
+        Math.abs(boss.x - player.x) < boss.size * 0.4 &&
+        Math.abs(boss.y - player.y) < boss.size * 0.4) {
+      boss.swoopHit = true;
+      triggerDamage(false);
     }
   }
   boss.x = Math.max(boss.size / 2, Math.min(WIDTH - boss.size / 2, boss.x));
 
-  // Attack timer
-  boss.attackTimer -= dt;
-  if (boss.attackTimer <= 0) {
-    // Choose random attack
-    const attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
-    executeBossAttack(boss, attack);
-    boss.attackTimer = boss.phaseTwo ? 2 + Math.random() * 2 : 3 + Math.random() * 2.5;
+  if (!boss.swoopPhase && boss.swoopWindup <= 0) {
+    // Movement AI (hover) - only while not diving
+    const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
+    if (Math.abs(boss.x - boss.targetX) > 10) {
+      boss.dir = boss.targetX > boss.x ? 1 : -1;
+      boss.x += moveSpeed * boss.dir * dt;
+    } else {
+      // Pick new target
+      if (Math.random() < 0.02) {
+        boss.targetX = 60 + Math.random() * (WIDTH - 120);
+      }
+    }
+    boss.x = Math.max(boss.size / 2, Math.min(WIDTH - boss.size / 2, boss.x));
+
+    // Attack timer
+    boss.attackTimer -= dt;
+    if (boss.attackTimer <= 0) {
+      // Random attack, but never the same one twice in a row - kills both
+      // teleport-chains and boring double-rains
+      let attack = boss.attacks[Math.floor(Math.random() * boss.attacks.length)];
+      if (boss.attacks.length > 1 && attack === boss.lastAttack) {
+        const others = boss.attacks.filter(a => a !== boss.lastAttack);
+        attack = others[Math.floor(Math.random() * others.length)];
+      }
+      boss.lastAttack = attack;
+      executeBossAttack(boss, attack);
+      boss.attackTimer = boss.phaseTwo ? 2 + Math.random() * 2 : 3 + Math.random() * 2.5;
+    }
+  }
+
+  // A low-flying boss breathes the stink: poop damages him while he is near
+  // the ground (the swoop window), so SHIFT is no longer useless against bosses
+  if (boss.y > HEIGHT - 220) {
+    for (let i = poops.length - 1; i >= 0; i--) {
+      const poop = poops[i];
+      if (!poop.isTrap && Math.abs(poop.x - boss.x) < boss.size * 0.8) {
+        damageBoss(2);
+        spawnParticles(poop.x, poop.y - 25, '\u{1F922}', 4, 90);
+        spawnScorePopup(boss.x, boss.y - 30, '\u{1F922} SMRDI!', '#88CC44');
+        poops.splice(i, 1);
+        break;
+      }
+    }
   }
 
   // Boss takes damage from fart clouds
@@ -4103,12 +4226,10 @@ function damageBoss(amount) {
 function executeBossAttack(boss, attack) {
   const px = player.x;
   switch (attack) {
-    case 'charge': // Rush toward player
+    case 'charge': // Telegraphed dive through the player's position
       boss.targetX = px;
-      boss.speed *= 2;
-      // Reset handled in updateBoss (pauses with the game, dies with the boss)
-      boss.chargeResetTimer = 1.5;
-      spawnScorePopup(boss.x, boss.y - 30, '⚡ JURIŠ!', '#FFAA00'); // telegraph
+      boss.swoopWindup = 0.7; // wind-up: boss flashes + ground marker, then dives
+      spawnScorePopup(boss.x, boss.y - 30, '⚡ OBRUŠAVA SE!', '#FFAA00'); // telegraph
       break;
     case 'howl': // Summon 2 wolves - one from each side so they never stack
       for (let i = 0; i < 2; i++) {
@@ -4124,7 +4245,8 @@ function executeBossAttack(boss, attack) {
       }
       spawnScorePopup(boss.x, boss.y - 30, 'AUUUUU! \u{1F43A}', '#888');
       break;
-    case 'summon': // Summon minions
+    case 'summon': // Summon minions (same stats as a regular fast devil -
+      // shakeRequired 6 like spawnDevil, not the silent default of 8)
       for (let i = 0; i < (boss.phaseTwo ? 3 : 2); i++) {
         objects.push({
           type: 'devil', devilType: 'fast',
@@ -4132,11 +4254,19 @@ function executeBossAttack(boss, attack) {
           y: boss.y + 20,
           width: 35, height: 35,
           speed: 200, value: 0,
-          emoji: '\u{1F608}'
+          emoji: '\u{1F608}',
+          latched: false, hammerTimer: 0, shakeProgress: 0,
+          shakeRequired: 6, hammerTimeout: 4, hammerAnimTimer: 0,
+          stealTimer: 0,
+          zigzagSpeed: 80 + Math.random() * 120,
+          zigzagFreq: 1.5 + Math.random() * 3,
+          zigzagPhase: Math.random() * Math.PI * 2,
+          zigzagTime: 0, nameTimer: 0
         });
       }
       break;
     case 'knives': // Throw knives in spread
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F52A} NOŽEVI!', '#CCCCCC'); // telegraph
       const count = boss.phaseTwo ? 5 : 3;
       for (let i = 0; i < count; i++) {
         const angle = -Math.PI / 2 + (i - (count-1)/2) * 0.3;
@@ -4187,21 +4317,13 @@ function executeBossAttack(boss, attack) {
       // Immediate follow-up attack
       boss.attackTimer = 0.5;
       break;
-    case 'rain': // Rain of fire from sky
-      for (let i = 0; i < (boss.phaseTwo ? 8 : 5); i++) {
-        setTimeout(() => {
-          if (boss && boss.state === 'fighting' && game.screen === 'playing' && !isPaused) {
-            bossProjectiles.push({
-              x: Math.random() * WIDTH,
-              y: -20,
-              vx: 0, vy: 200 + Math.random() * 100,
-              life: 3, emoji: '\u{1F525}', size: 20
-            });
-          }
-        }, i * 200);
-      }
+    case 'rain': // Rain of fire from sky - queued in game time (see updateBoss)
+      boss.rainDrops = boss.phaseTwo ? 8 : 5;
+      boss.rainTimer = 0.5; // short telegraph gap before the first drop
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F525} KIŠA VATRE!', '#FF4400');
       break;
     case 'pitchfork': // Throw pitchfork
+      spawnScorePopup(boss.x, boss.y - 30, '\u{1F531} VILE!', '#DDAA55'); // telegraph
       bossProjectiles.push({
         x: boss.x, y: boss.y + boss.size / 2,
         vx: (px - boss.x) * 0.8,
@@ -5636,6 +5758,8 @@ function update(dt) {
       poops.splice(p, 1);
       continue;
     }
+    // Enemy traps don't kill the farmer's own allies (and never pay the player)
+    if (poop.isTrap) continue;
 
     for (let e = groundEnemies.length - 1; e >= 0; e--) {
       if (aabb(poop, groundEnemies[e])) {
@@ -5704,9 +5828,10 @@ function update(dt) {
 
     if (vegan) vegan.x = Math.max(30, Math.min(WIDTH - 30, vegan.x));
 
-    // Poop collision - kills vegan!
+    // Poop collision - kills vegan! (only the PLAYER's poop - the death
+    // message blames the player, so enemy traps must not trigger it)
     for (const poop of poops) {
-      if (vegan && aabb(vegan, poop)) {
+      if (vegan && !poop.isTrap && aabb(vegan, poop)) {
         killVegan('poop');
         break;
       }
@@ -7314,27 +7439,20 @@ function drawBoss() {
     }
   }
 
-  // HP bar
-  const barW = boss.size * 1.2;
-  const barH = 8;
-  const barX = bx - barW / 2;
-  const barY = by - boss.size * 0.5 - 15;
-  // Background
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
-  // HP fill
-  const hpPct = boss.hp / boss.maxHp;
-  const hpColor = hpPct > 0.5 ? '#44FF44' : hpPct > 0.25 ? '#FFAA00' : '#FF2222';
-  ctx.fillStyle = hpColor;
-  ctx.fillRect(barX, barY, barW * hpPct, barH);
-  // Boss name above HP
-  ctx.font = 'bold 14px sans-serif';
-  ctx.fillStyle = '#FF4444';
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 3;
-  ctx.strokeText(boss.name, bx, barY - 8);
-  ctx.fillText(boss.name, bx, barY - 8);
-  ctx.lineWidth = 1;
+  // (HP bar + name moved to a big fixed boss bar in drawHUD - the small bar
+  // glued to the boss was drawn above the top edge for the larger bosses)
+
+  // Swoop wind-up: pulsing red warning ring around the boss - "he's coming DOWN"
+  if (boss.state === 'fighting' && boss.swoopWindup > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5 + Math.sin(t * 20) * 0.4;
+    ctx.strokeStyle = '#FF3300';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(bx, by, boss.size * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // How-to-fight hint for the first seconds of the fight (kids don't guess
   // that farts fly upward - tell them!)
@@ -7354,13 +7472,14 @@ function drawBoss() {
     ctx.restore();
   }
 
-  // Slam telegraph: warning marker on the ground where the hit will land
-  if (boss.state === 'fighting' && boss.pendingSlamTimer > 0) {
+  // Slam/swoop telegraph: warning marker on the ground where the hit will land
+  if (boss.state === 'fighting' && (boss.pendingSlamTimer > 0 || boss.swoopWindup > 0 || boss.swoopPhase === 'down')) {
     ctx.save();
     ctx.globalAlpha = 0.5 + Math.sin(t * 15) * 0.4;
     ctx.font = '30px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('⚠️', bx, HEIGHT - 60);
+    const markerX = (boss.swoopWindup > 0 || boss.swoopPhase === 'down') ? boss.targetX : bx;
+    ctx.fillText('⚠️', markerX, HEIGHT - 60);
     ctx.restore();
   }
 
@@ -7511,6 +7630,36 @@ function drawHUD() {
   ctx.fill();
   hudText(levelText, WIDTH / 2, 10, levelFont, '#fff', 'center');
 
+  // Boss fight: the level timer is frozen anyway (level can't end until the
+  // boss falls), so its slot shows a big, always-on-screen boss HP bar with
+  // name and a phase-2 notch - the small bar glued to the boss used to be
+  // drawn above the top edge for the larger bosses.
+  if (bossActive && boss) {
+    const bw = 280, bh = 14;
+    const bbx = WIDTH / 2 - bw / 2;
+    const bby = 40;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    ctx.roundRect(bbx - 2, bby - 2, bw + 4, bh + 4, 7);
+    ctx.fill();
+    const bossPct = Math.max(0, boss.hp / boss.maxHp);
+    ctx.fillStyle = boss.hitFlash > 0 ? '#FFFFFF' : (boss.phaseTwo ? '#FF7722' : '#EE3333');
+    if (bossPct > 0) {
+      ctx.beginPath();
+      ctx.roundRect(bbx, bby, bw * bossPct, bh, 6);
+      ctx.fill();
+    }
+    // Phase 2 threshold notch: "two more farts to phase 2" becomes readable
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(bbx + bw / 2 - 1, bby - 3, 2, bh + 6);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bbx - 2, bby - 2, bw + 4, bh + 4, 7);
+    ctx.stroke();
+    const bossLabel = boss.emoji + ' ' + boss.name + (boss.phaseTwo ? ' \u{1F525} FAZA 2!' : '');
+    hudText(bossLabel, WIDTH / 2, mHud ? 58 : 56, timerFont, '#FFD0D0', 'center');
+  } else
   // Timer bar below level text
   if (game.levelConfig) {
     const timerBarWidth = 160;
@@ -10583,10 +10732,21 @@ function drawPlayingScene() {
     ctx.font = Math.round(28 * ms) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('\u{1F4A9}', poop.x, poop.y);
-    // Green stink waves rising
+    if (poop.isTrap) {
+      // Enemy trap: pulsing red warning ring so it can't be mistaken for
+      // the player's own (harmless-to-him) poop
+      const trapPulse = 0.35 + Math.sin(poop.stinkTimer * 6) * 0.2;
+      ctx.fillStyle = 'rgba(255, 40, 40, ' + trapPulse + ')';
+      ctx.beginPath();
+      ctx.ellipse(poop.x, poop.y + 8, 26, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillText(poop.emoji || '\u{1F4A9}', poop.x, poop.y);
+    // Stink waves rising (red for enemy traps, green for player poop)
     const alpha = poop.life / POOP_DURATION;
-    ctx.strokeStyle = `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
+    ctx.strokeStyle = poop.isTrap
+      ? `rgba(230, 60, 60, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`
+      : `rgba(100, 200, 50, ${(Math.sin(poop.stinkTimer * 3) * 0.3 + 0.5) * alpha})`;
     ctx.lineWidth = 2;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
