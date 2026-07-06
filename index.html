@@ -142,7 +142,7 @@
 <body>
 <canvas id="gameCanvas"></canvas>
 <button id="fullscreenBtn">&#x26F6;</button>
-<button id="pauseBtn" onclick="if(game.screen==='playing'){isPaused=!isPaused;}">&#x23F8;</button>
+<button id="pauseBtn" onclick="togglePause()">&#x23F8;</button>
 
 <!-- Mobile virtual gamepad: ◀  💨  ▲▼  ▶ -->
 <div id="touchControls">
@@ -423,7 +423,9 @@ const game = {
 // --- Player Name & Bitcoin Currency ---
 let playerName = localStorage.getItem('kasicaPlayerName') || '';
 let playerBTC = 0;
-let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0');
+let btcBanked = 0; // how much of playerBTC was already added to totalBTC this run
+let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0', 10);
+if (!Number.isFinite(totalBTC)) totalBTC = 0;
 
 // --- Shop Power-ups ---
 let scoreMultiplier = 1;
@@ -436,7 +438,7 @@ const SHOP_ITEMS = [
   { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
   { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
-  { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak, +2 prde\u017Ea', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; fartCharges = Math.min(MAX_FARTS, fartCharges + 2); } },
+  { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak na slede\u0107em nivou', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; } },
   { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } },
   { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 8, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
 ];
@@ -451,21 +453,43 @@ function hideNameInput() {
   document.getElementById('nameInputOverlay').style.display = 'none';
 }
 
+// Cached leaderboard - parsed once, refreshed after saves (avoids JSON.parse every frame)
+let leaderboardCache = null;
+function loadLeaderboard() {
+  if (leaderboardCache) return leaderboardCache;
+  try {
+    const parsed = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+    leaderboardCache = Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    // Corrupted storage - discard it instead of crashing every frame
+    try { localStorage.removeItem('kasicaLeaderboard'); } catch (e2) {}
+    leaderboardCache = [];
+  }
+  return leaderboardCache;
+}
+
 function saveToLeaderboard() {
-  const entry = {
-    name: playerName,
-    score: game.score,
-    level: game.level,
-    btc: playerBTC,
-    date: new Date().toISOString().split('T')[0]
-  };
-  let leaderboard = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
-  leaderboard.push(entry);
-  leaderboard.sort(function(a, b) { return b.score - a.score; });
-  leaderboard = leaderboard.slice(0, 20);
-  localStorage.setItem('kasicaLeaderboard', JSON.stringify(leaderboard));
-  totalBTC += playerBTC;
-  localStorage.setItem('kasicaTotalBTC', totalBTC.toString());
+  try {
+    const entry = {
+      name: playerName,
+      score: game.score,
+      level: game.level,
+      btc: playerBTC,
+      date: new Date().toISOString().split('T')[0]
+    };
+    let leaderboard = loadLeaderboard().slice();
+    leaderboard.push(entry);
+    leaderboard.sort(function(a, b) { return b.score - a.score; });
+    leaderboard = leaderboard.slice(0, 20);
+    leaderboardCache = leaderboard;
+    localStorage.setItem('kasicaLeaderboard', JSON.stringify(leaderboard));
+    // Only bank BTC that hasn't been banked yet this run (death + resurrect + victory = no double counting)
+    totalBTC += Math.max(0, playerBTC - btcBanked);
+    btcBanked = Math.max(btcBanked, playerBTC);
+    localStorage.setItem('kasicaTotalBTC', totalBTC.toString());
+  } catch (e) {
+    // Never let storage problems break death/victory sequences
+  }
 }
 
 // --- Intro Cutscene State ---
@@ -505,7 +529,11 @@ const ENEMY_INTROS = {
   carnivore: { icon: '\u{1F356}', name: 'MESO\u017DDER', desc: 'Juri te po zemlji! Be\u017Eiii!' },
   farmer: { icon: '\u{1F468}\u200D\u{1F33E}', name: 'FARMER', desc: 'Hvata svinje za klanicu!' },
   vegan: { icon: '\u{1F331}', name: 'VEGAN PRIJATELJ', desc: 'Brani te od meso\u017Edera! \u010Cuvaj ga!' },
-  bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' }
+  bomb: { icon: '\u{1F4A3}', name: 'BOMBA', desc: 'Eksplodira! Izbegavaj po svaku cenu!' },
+  boss_velikiVuk: { icon: '\u{1F43A}', name: 'BOSS: VELIKI VUK', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}!' },
+  boss_megaKasapin: { icon: '\u{1F52A}', name: 'BOSS: MEGA KASAPIN', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Beži od noževa!' },
+  boss_kraljDjavola: { icon: '\u{1F47F}', name: 'BOSS: KRALJ ĐAVOLA', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Izbegavaj vatru!' },
+  boss_zloFarmer: { icon: '\u{1F468}‍\u{1F33E}', name: 'BOSS: ZLO FARMER', desc: 'Gađaj ga prdežima \u{1F4A8} i vlažnim prdežima \u{1F4A6}! Pazi na vile i zamke!' }
 };
 
 function triggerEnemyIntro(type) {
@@ -946,7 +974,9 @@ const BIOME_ORDER = ['livada', 'suma', 'grad', 'sneg', 'pakao', 'oblaci'];
 
 function getBiomeForLevel(level) {
   if (level <= 2) return BIOMES.livada;
-  const idx = Math.min(BIOME_ORDER.length - 1, Math.floor((level - 1) / 2));
+  // Level 10 (the finale) plays in the clouds - bright happy ending after Pakao (level 9)
+  if (level >= 10) return BIOMES.oblaci;
+  const idx = Math.min(BIOME_ORDER.length - 2, Math.floor((level - 1) / 2));
   return BIOMES[BIOME_ORDER[idx]];
 }
 
@@ -1121,6 +1151,7 @@ function updateClouds(dt) {
 // --- Piggy Visual State ---
 let piggyBobTimer = 0;
 let piggyDamageTimer = 0; // red tint + scale pulse on damage
+let invulnTimer = 0; // brief invulnerability after taking a hit (prevents multi-hit in one frame)
 
 // --- HUD bounce ---
 let scoreBounceFactor = 0;
@@ -1132,6 +1163,7 @@ let titleCoinTimer = 0;
 // --- Audio ---
 let audioCtx = null;
 let audioUnlocked = false;
+let audioUnlockedAt = 0; // when the unlock happened (document-level listeners fire before game handlers)
 function getAudioContext() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -1150,6 +1182,7 @@ function unlockAudio() {
     src.connect(ctx.destination);
     src.start(0);
     audioUnlocked = true;
+    audioUnlockedAt = performance.now();
     // If game is already playing but music hasn't started, start it now
     if (game.screen === 'playing' && !musicPlaying) {
       startMusic();
@@ -2714,7 +2747,9 @@ function startLevel() {
       hitFlash: 0,
       phaseTwo: false, // below 50% hp
       deathTimer: 0,
-      shakeTimer: 0
+      shakeTimer: 0,
+      pendingSlamTimer: 0,
+      chargeResetTimer: 0
     };
     // Boss levels get extra time and extra wet farts
     game.levelTimer += 15;
@@ -2757,10 +2792,9 @@ function startLevel() {
 
   // Reset fart state
   fartCharges = MAX_FARTS; // refill farts each level
-  // Reset per-level power-ups (shield persists)
-  scoreMultiplier = 1;
-  turboFart = false;
-  megaPoop = false;
+  // NOTE: scoreMultiplier/turboFart/megaPoop are NOT reset here - they are bought
+  // in the shop right before startLevel() and must last for the whole next level.
+  // They are cleared at the END of a level instead (levelTimer <= 0 block).
   fartClouds.length = 0;
   chokingDevils.length = 0;
   fartCooldown = 0;
@@ -2814,6 +2848,7 @@ function startLevel() {
   }
   // materials persist between levels (NOT reset here)
   piggyDamageTimer = 0;
+  invulnTimer = 0;
   scoreBounceFactor = 0;
   houses.length = 0;
   houseSpawnTimer = 8;
@@ -2829,6 +2864,62 @@ function startLevel() {
   showHelp = false;
   game.screen = 'playing';
   startMusic();
+}
+
+// Reset everything that belongs to a single run - used by BOTH start paths
+// (SPACE on title and click/tap on title) so they behave identically.
+function resetRun() {
+  game.score = 0;
+  game.level = 1;
+  game.cracks = 0;
+  game.maxCracks = 3;
+  materials = { straw: 0, logs: 0, bricks: 0 };
+  playerBTC = 0;
+  btcBanked = 0;
+  scoreMultiplier = 1;
+  hasShield = false;
+  turboFart = false;
+  megaPoop = false;
+  wetFartCharges = 5;
+  wetFartProjectiles.length = 0;
+  wetFartInflateTimer = 0;
+  resurrectionCount = 0;
+  invulnTimer = 0;
+  Object.keys(introducedEnemies).forEach(function(k) { delete introducedEnemies[k]; });
+  enemyIntroActive = null;
+}
+
+// Pause helper: keeps music in sync with pause state
+function setPaused(v) {
+  if (isPaused === v) return;
+  isPaused = v;
+  if (game.screen === 'playing') {
+    if (v) stopMusic(); else startMusic();
+  }
+}
+
+// Used by keyboard (P), and the on-screen pause button.
+// If the help overlay is open, unpausing must also close it - otherwise the
+// game keeps running "blind" behind an opaque overlay.
+function togglePause() {
+  if (game.screen !== 'playing') return;
+  if (showHelp) {
+    showHelp = false;
+    setPaused(false);
+  } else {
+    setPaused(!isPaused);
+  }
+}
+
+// Shop entry helper: clears stale click rects from the previous shop visit and
+// records entry time, so the same click/tap/keypress that opened the shop can
+// never immediately buy an item or hit the skip button.
+let shopEnteredAt = 0;
+function enterShop() {
+  shopSkipRect = null;
+  SHOP_ITEMS.forEach(function(it) { it._rect = null; });
+  shopEnteredAt = performance.now();
+  game.screen = 'shop';
 }
 
 // --- Input ---
@@ -2874,8 +2965,25 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Don't process game keys during name input or shop
-  if (game.screen === 'nameInput' || game.screen === 'shop') return;
+  // Don't process game keys during name input
+  if (game.screen === 'nameInput') return;
+
+  // Shop keyboard controls: SPACE/Enter = next level, ESC = help
+  if (game.screen === 'shop') {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      // Ignore the same key press / key repeat that opened the shop
+      if (performance.now() - shopEnteredAt < 300) return;
+      if (showHelp) { showHelp = false; return; }
+      game.level++;
+      startLevel();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      showHelp = !showHelp;
+    }
+    return;
+  }
+
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
     e.preventDefault();
   }
@@ -2884,18 +2992,18 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && game.screen === 'playing') {
     if (showHelp) {
       showHelp = false;
-      isPaused = false;
+      setPaused(false);
     } else {
       showHelp = true;
-      isPaused = true;
+      setPaused(true);
     }
     e.preventDefault();
     return;
   }
 
-  // Pause toggle - P only
+  // Pause toggle - P only (closes help overlay too, see togglePause)
   if ((e.key === 'p' || e.key === 'P') && game.screen === 'playing') {
-    isPaused = !isPaused;
+    togglePause();
     e.preventDefault();
     return;
   }
@@ -2990,11 +3098,17 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === ' ') {
     if (game.screen === 'intro') {
-      // First key press: just unlock audio and start music
+      // First key press: just unlock audio and start music.
+      // The document-level keydown listener unlocks audio BEFORE this handler
+      // runs, so also treat a just-happened unlock (<150ms) as "this press
+      // only unlocked audio" and don't advance the scene.
       if (!audioUnlocked) {
         unlockAudio();
         forceRestartIntroMusic();
         return;
+      }
+      if (performance.now() - audioUnlockedAt < 150) {
+        return; // unlockAudio() already started the intro music
       }
       if (introScene >= 5) {
         stopIntroMusic();
@@ -3011,23 +3125,18 @@ window.addEventListener('keydown', (e) => {
     }
     if (game.screen === 'title') {
       playOink();
-      game.score = 0;
-      game.level = 1;
-      game.cracks = 0;
-      game.maxCracks = 3;
-      materials = { straw: 0, logs: 0, bricks: 0 };
-      playerBTC = 0;
-      scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
-      wetFartCharges = 5; wetFartProjectiles.length = 0; wetFartInflateTimer = 0;
+      resetRun();
       startLevel();
     } else if (game.screen === 'gameOver') {
+      // Don't let a nervous SPACE mash skip the resurrection sequence
+      if (resurrectionState !== 'done') return;
       game.score = 0;
       game.level = 1;
       game.screen = 'title';
       Object.keys(introducedEnemies).forEach(k => delete introducedEnemies[k]);
       enemyIntroActive = null;
     } else if (game.screen === 'levelComplete') {
-      game.screen = 'shop';
+      enterShop();
     } else if (game.screen === 'victory') {
       stopVictoryMusic();
       game.screen = 'title';
@@ -3061,14 +3170,7 @@ canvas.addEventListener('click', () => {
   }
   if (game.screen === 'title') {
     playOink();
-    game.score = 0;
-    game.level = 1;
-    game.cracks = 0;
-    game.maxCracks = 3;
-    materials = { straw: 0, logs: 0, bricks: 0 };
-    playerBTC = 0;
-    scoreMultiplier = 1; hasShield = false; turboFart = false; megaPoop = false;
-    resurrectionCount = 0;
+    resetRun();
     // Auto-fullscreen on mobile game start
     if ('ontouchstart' in window && !document.fullscreenElement && !document.webkitFullscreenElement) {
       const el = document.documentElement;
@@ -3082,7 +3184,7 @@ canvas.addEventListener('click', () => {
     game.level = 1;
     game.screen = 'title';
   } else if (game.screen === 'levelComplete') {
-    game.screen = 'shop';
+    enterShop();
   } else if (game.screen === 'victory') {
     stopVictoryMusic();
     game.screen = 'title';
@@ -3141,9 +3243,9 @@ function simulateKeyDown(keyName) {
     else spawnScorePopup(player.x, player.y - 40, 'Nema dovoljno materijala!', '#ff4444');
   }
 
-  // Handle fart on space
+  // Handle fart on space (same rules as keyboard: not while in house)
   if (keyName === ' ' && game.screen === 'playing') {
-    if (fartCharges > 0 && fartCooldown <= 0) {
+    if (fartCharges > 0 && fartCooldown <= 0 && !player.inHouse) {
       fartCharges--;
       fartCooldown = 0.5;
       var tfs = turboFart ? 1.5 : 1.0;
@@ -3234,6 +3336,10 @@ const FART_H = 100;
 const FART_Y = DIR_Y + DIR_H + GAP;
 
 const mobileZones = [
+  // KU\u0106A - above LEVO (mirrors SERI above DESNO); builds a house from materials
+  { id: 'house', key: 'k', icon: '\uD83C\uDFE0', label: 'KU\u0106A',
+    color: 'rgba(255,150,80,',
+    x: PAD, y: POOP_Y, w: DIR_W, h: POOP_H },
   // LEVO
   { id: 'left',  key: 'ArrowLeft',  icon: '\u25C0', label: 'LEVO',
     color: 'rgba(100,150,255,',
@@ -3490,6 +3596,9 @@ function aabb(a, b) {
 
 // --- Update ---
 function triggerDamage(fromBomb) {
+  // Invulnerability frames: overlapping enemies / simultaneous hits can't
+  // drain multiple hearts in a single moment
+  if (invulnTimer > 0) return;
   if (player.inHouse && player.inHouse.hp > 0) {
     // Redirect damage to house
     player.inHouse.hp--;
@@ -3506,6 +3615,7 @@ function triggerDamage(fromBomb) {
   }
   game.cracks++;
   game.score = Math.max(0, game.score - 5);
+  invulnTimer = 1.0;
   flashTimer = 0.3;
   flashColor = '#ff0000';
   piggyDamageTimer = 0.3;
@@ -3527,7 +3637,6 @@ function triggerDamage(fromBomb) {
     gameOverTimer = 0;
     stopMusic();
     playGameOver();
-    saveToLeaderboard();
     // Initialize laughing devils
     gameOverDevils = [];
     for (let i = 0; i < 4; i++) {
@@ -3556,6 +3665,8 @@ function triggerDamage(fromBomb) {
     }
     resurrectionTimer = 0;
     angelY = -50;
+    // Save last: even if storage misbehaves, gameOver state above is fully initialized
+    saveToLeaderboard();
   }
 }
 
@@ -3572,7 +3683,7 @@ function updateBoss(dt) {
       boss.y = 60;
       boss.state = 'fighting';
       bossActive = true;
-      triggerEnemyIntro(boss.type === 'velikiVuk' ? 'wolf' : boss.type === 'megaKasapin' ? 'butcher' : boss.type === 'kraljDjavola' ? 'devil_fast' : 'farmer');
+      triggerEnemyIntro('boss_' + boss.type);
       spawnScorePopup(WIDTH / 2, HEIGHT / 3, '\u26A0\uFE0F BOSS: ' + boss.name + ' \u26A0\uFE0F', '#FF0000');
       triggerScreenShake(10, 0.5);
     }
@@ -3611,6 +3722,24 @@ function updateBoss(dt) {
     return;
   }
 
+  // Delayed attack effects (in-update timers instead of setTimeout: they pause
+  // with the game and can never fire during gameOver or after the boss dies)
+  if (boss.pendingSlamTimer > 0) {
+    boss.pendingSlamTimer -= dt;
+    if (boss.pendingSlamTimer <= 0) {
+      boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
+      triggerScreenShake(12, 0.5);
+      // Damage if player is near
+      if (Math.abs(boss.x - player.x) < 80) triggerDamage(false);
+    }
+  }
+  if (boss.chargeResetTimer > 0) {
+    boss.chargeResetTimer -= dt;
+    if (boss.chargeResetTimer <= 0) {
+      boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : boss.speed / 2;
+    }
+  }
+
   // Movement AI
   const moveSpeed = boss.speed * (boss.phaseTwo ? 1.0 : 0.7);
   if (Math.abs(boss.x - boss.targetX) > 10) {
@@ -3641,11 +3770,16 @@ function updateBoss(dt) {
       fartClouds.splice(i, 1);
     }
   }
-  // Boss takes damage from wet fart projectiles
+  // Boss takes damage from wet fart projectiles.
+  // The stink rises as a column: a wet fart passing under the boss hits it
+  // regardless of height (bosses hover at y=60, projectiles fly at player height).
   for (let i = wetFartProjectiles.length - 1; i >= 0; i--) {
     const wf = wetFartProjectiles[i];
-    if (Math.abs(wf.x - boss.x) < boss.size && Math.abs(wf.y - boss.y) < boss.size) {
+    if (Math.abs(wf.x - boss.x) < boss.size * 0.8) {
       damageBoss(3);
+      // Rising stink visual so the hit reads clearly
+      spawnParticles(boss.x, boss.y + boss.size / 2, '\u{1F4A6}', 4, 100);
+      spawnParticles(wf.x, wf.y - 30, '\u{1F4A8}', 3, 120);
       wetFartProjectiles.splice(i, 1);
     }
   }
@@ -3677,17 +3811,19 @@ function executeBossAttack(boss, attack) {
     case 'charge': // Rush toward player
       boss.targetX = px;
       boss.speed *= 2;
-      setTimeout(() => { if (boss) boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : boss.speed / 2; }, 1500);
+      // Reset handled in updateBoss (pauses with the game, dies with the boss)
+      boss.chargeResetTimer = 1.5;
       break;
     case 'howl': // Summon 2 wolves
       for (let i = 0; i < 2; i++) {
         const fromLeft = Math.random() > 0.5;
+        const wt = GROUND_ENEMY_TYPES.wolf;
         groundEnemies.push({
-          type: 'wolf', emoji: '\u{1F43A}',
+          type: 'wolf', emoji: wt.emoji,
           x: fromLeft ? -30 : WIDTH + 30,
-          y: HEIGHT - 55, width: 50, height: 50,
+          y: HEIGHT - 45, width: wt.size, height: wt.size,
           speed: 80, dir: fromLeft ? 1 : -1,
-          ai: 'straight', pauseTimer: 0, frozen: 0, nameTimer: 0
+          ai: 'straight', pauseTimer: 0, frozen: 0, animTimer: 0, nameTimer: 0
         });
       }
       spawnScorePopup(boss.x, boss.y - 30, 'AUUUUU! \u{1F43A}', '#888');
@@ -3719,14 +3855,8 @@ function executeBossAttack(boss, attack) {
     case 'slam': // Jump to player position
       boss.targetX = px;
       boss.speed = 400;
-      setTimeout(() => {
-        if (boss) {
-          boss.speed = BOSS_TYPES[boss.type] ? BOSS_TYPES[boss.type].speed * (boss.phaseTwo ? 1.4 : 1) : 70;
-          triggerScreenShake(12, 0.5);
-          // Damage if player is near
-          if (Math.abs(boss.x - player.x) < 80) triggerDamage(false);
-        }
-      }, 800);
+      // Impact handled in updateBoss (never fires during pause/gameOver or after boss death)
+      boss.pendingSlamTimer = 0.8;
       break;
     case 'fireball': // Fire projectile at player
       const dx = px - boss.x;
@@ -3763,7 +3893,7 @@ function executeBossAttack(boss, attack) {
     case 'rain': // Rain of fire from sky
       for (let i = 0; i < (boss.phaseTwo ? 8 : 5); i++) {
         setTimeout(() => {
-          if (boss && boss.state === 'fighting') {
+          if (boss && boss.state === 'fighting' && game.screen === 'playing' && !isPaused) {
             bossProjectiles.push({
               x: Math.random() * WIDTH,
               y: -20,
@@ -3956,6 +4086,7 @@ function update(dt) {
         game.cracks = 0;
         resurrectionCount++;
         game.screen = 'playing';
+        player.x = WIDTH / 2;
         player.y = player.groundY;
         player.vy = 0;
         player.grounded = true;
@@ -3963,6 +4094,21 @@ function update(dt) {
         player.inHouse = null;
         houses.length = 0;
         houseSpawnTimer = 8;
+        // Clear the battlefield so the paid resurrection isn't instantly punished
+        // by leftover bombs/projectiles (same cleanup as the Ctrl+P cheat)
+        objects.length = 0;
+        ejectedCoins.length = 0;
+        groundEnemies.length = 0;
+        bossProjectiles.length = 0;
+        lightningBolts.length = 0;
+        lightningWarning = null;
+        fartClouds.length = 0;
+        chokingDevils.length = 0;
+        gameOverDevils.length = 0;
+        wetFartProjectiles.length = 0;
+        wetFartInflateTimer = 0;
+        piggyDamageTimer = 0;
+        invulnTimer = 1.5; // short grace period to react
         resurrectionState = 'done';
         startMusic();
       }
@@ -4014,6 +4160,7 @@ function update(dt) {
   if (flashTimer > 0) flashTimer -= dt;
   if (successFlashTimer > 0) successFlashTimer -= dt;
   if (piggyDamageTimer > 0) piggyDamageTimer -= dt;
+  if (invulnTimer > 0) invulnTimer -= dt;
   if (scoreBounceFactor > 0) scoreBounceFactor -= dt * 4;
   if (shakeVisualTimer > 0) {
     shakeVisualTimer -= dt;
@@ -4114,14 +4261,20 @@ function update(dt) {
     }
   }
 
-  // Coin rain power-up: extra coins
+  // Coin rain power-up: extra coins (same shape as spawnObject coins -
+  // COIN_TYPES has no emoji/size fields, so build width/height explicitly)
   if (hasPowerUp('coinRain') && Math.random() < 0.1) {
     const ct = pickCoinType();
+    const crSize = ct.value >= 10 ? 40 : (ct.value >= 5 ? 36 : 30);
     objects.push({
-      type: 'coin', emoji: ct.emoji,
-      x: Math.random() * (WIDTH - 40) + 20,
-      y: -20, width: ct.size, height: ct.size,
+      type: 'coin',
+      coinType: ct,
+      x: Math.random() * (WIDTH - crSize) + crSize / 2,
+      y: -crSize / 2,
+      width: crSize,
+      height: crSize,
       speed: (game.levelConfig ? game.levelConfig.fallSpeed : 150) * 0.7,
+      emoji: null,
       value: ct.value
     });
   }
@@ -4171,6 +4324,11 @@ function update(dt) {
   }
   if (game.levelTimer <= 0) {
     game.levelTimer = 0;
+    // Per-level shop power-ups expire at the END of the level, so purchases
+    // made in the shop (before startLevel) apply to the entire next level.
+    scoreMultiplier = 1;
+    turboFart = false;
+    megaPoop = false;
     objects.length = 0;
     ejectedCoins.length = 0;
     if (game.latchedDevil) {
@@ -4746,8 +4904,14 @@ function update(dt) {
           } else if (dt === 'thief') {
             devilTypeIndicator = { text: '\u{1F911} LOPOV!', color: '#cc44ff', timer: 1.5 };
           }
+          objects.splice(i, 1);
+        } else {
+          // One devil is already latched: the newcomer bounces off instead of
+          // silently disappearing (holding a devil is not a free shield)
+          obj.flyAway = true;
+          obj.flyAwayTimer = 0.8;
+          spawnParticles(obj.x, obj.y, '\u{1F4AB}', 3, 80);
         }
-        objects.splice(i, 1);
         continue;
       } else if (obj.type === 'butcher') {
         if (!game.latchedDevil) {
@@ -4771,8 +4935,12 @@ function update(dt) {
           shakeHintTimer = 0;
           playButcherLatch();
           devilTypeIndicator = { text: '\u{1F52A} KASAPIN!', color: '#cc0000', timer: 2.0 };
+          objects.splice(i, 1);
+        } else {
+          obj.flyAway = true;
+          obj.flyAwayTimer = 0.8;
+          spawnParticles(obj.x, obj.y, '\u{1F4AB}', 3, 80);
         }
-        objects.splice(i, 1);
         continue;
       } else if (obj.type === 'material') {
         materials[obj.materialType]++;
@@ -7185,7 +7353,8 @@ function drawShop() {
     var buyBtnY = y + (isMobile ? 150 : 125);
     var buyBtnX = x + (isMobile ? 10 : 20);
     var buyBtnW = cardW - (isMobile ? 20 : 40);
-    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6);
+    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS);
+    var isActive = !isMaxed && isShopItemActive(item);
     if (isMaxed) {
       ctx.fillStyle = '#555';
       ctx.beginPath();
@@ -7194,6 +7363,14 @@ function drawShop() {
       ctx.fillStyle = '#aaa';
       ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
       ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+    } else if (isActive) {
+      ctx.fillStyle = '#1d4d1d';
+      ctx.beginPath();
+      ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
+      ctx.fill();
+      ctx.fillStyle = '#7fe07f';
+      ctx.font = `bold ${isMobile ? 16 : 12}px sans-serif`;
+      ctx.fillText('AKTIVNO', x + cardW / 2, buyBtnY + buyBtnH / 2);
     } else if (canBuy) {
       ctx.fillStyle = '#F7931A';
       ctx.beginPath();
@@ -7257,7 +7434,24 @@ function drawShop() {
   ctx.fillText('ESC - pravila i komande', WIDTH - 10, 15);
 }
 
+// Is a per-run shop item already active/maxed (buying again would waste BTC)?
+function isShopItemActive(item) {
+  if (item.id === 'doubleScore') return scoreMultiplier > 1;
+  if (item.id === 'shield') return hasShield;
+  if (item.id === 'turboFart') return turboFart;
+  if (item.id === 'megaPoop') return megaPoop;
+  if (item.id === 'extraLife') return game.maxCracks >= 6;
+  if (item.id === 'wetFart') return wetFartCharges >= MAX_WET_FARTS;
+  return false;
+}
+
 function handleShopClick(e) {
+  // Ignore the very click that opened the shop (two click listeners receive
+  // the same event; the levelComplete "Nastavi" button overlaps the skip button)
+  if (performance.now() - shopEnteredAt < 300) return;
+  // Click while help overlay is open just closes the help
+  if (showHelp) { showHelp = false; return; }
+
   var rect = canvas.getBoundingClientRect();
   var clickX = (e.clientX - rect.left) * (WIDTH / rect.width);
   var clickY = (e.clientY - rect.top) * (HEIGHT / rect.height);
@@ -7266,8 +7460,8 @@ function handleShopClick(e) {
   for (var si = 0; si < SHOP_ITEMS.length; si++) {
     var item = SHOP_ITEMS[si];
     if (item._rect && playerBTC >= item.cost) {
-      // Block only when already at absolute max
-      if (item.id === 'extraLife' && game.maxCracks >= 6) continue;
+      // Block double purchase of already active/maxed items
+      if (isShopItemActive(item)) continue;
       var r = item._rect;
       if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
         playerBTC -= item.cost;
@@ -7277,13 +7471,10 @@ function handleShopClick(e) {
     }
   }
 
-  // Check skip button - on mobile, the entire bottom area works as skip
+  // Check skip button (big enough to tap on mobile - no blanket area needed)
   if (shopSkipRect) {
     var sr = shopSkipRect;
-    var hitSkip = (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h);
-    // On mobile: tap below cards area (y > 340) also works as skip
-    if (isMobile && clickY > 340) hitSkip = true;
-    if (hitSkip) {
+    if (clickX >= sr.x && clickX <= sr.x + sr.w && clickY >= sr.y && clickY <= sr.y + sr.h) {
       game.level++;
       startLevel();
     }
@@ -9288,7 +9479,7 @@ function drawTitle() {
   ctx.lineWidth = 1;
 
   // Leaderboard
-  var lb = JSON.parse(localStorage.getItem('kasicaLeaderboard') || '[]');
+  var lb = loadLeaderboard();
   if (lb.length > 0) {
     ctx.font = 'bold 18px sans-serif';
     ctx.fillStyle = '#FFD700';
