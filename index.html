@@ -2996,6 +2996,27 @@ function resetRun() {
   enemyIntroActive = null;
 }
 
+// Leaving the intro cutscene for the title screen - ALL exits (ESC, the
+// "Preskoči sve" button, or watching it to the end) go through here so the
+// "story already seen" flag can never be missed. Returning players start on
+// the title screen; the "📖 Priča" button there replays the cutscene.
+function finishIntro() {
+  stopIntroMusic();
+  game.screen = 'title';
+  introScene = 0;
+  try { localStorage.setItem('kasicaIntroSeen', '1'); } catch (err) { /* private mode */ }
+}
+
+// Replay the story from the title screen ("📖 Priča" button)
+function replayIntro() {
+  introScene = 0;
+  introTimer = 0;
+  introTextOpacity = 0;
+  introFadeOut = 0;
+  game.screen = 'intro';
+  forceRestartIntroMusic();
+}
+
 // Pause helper: keeps music in sync with pause state
 function setPaused(v) {
   if (isPaused === v) return;
@@ -3151,9 +3172,7 @@ window.addEventListener('keydown', (e) => {
 
   // ESC on the intro cutscene skips straight to the title
   if (e.key === 'Escape' && game.screen === 'intro') {
-    stopIntroMusic();
-    game.screen = 'title';
-    introScene = 0;
+    finishIntro();
     e.preventDefault();
     return;
   }
@@ -3305,9 +3324,7 @@ window.addEventListener('keydown', (e) => {
         return; // unlockAudio() already started the intro music
       }
       if (introScene >= 5) {
-        stopIntroMusic();
-        game.screen = 'title';
-        introScene = 0;
+        finishIntro();
       } else {
         introScene++;
         introTimer = 0;
@@ -3349,9 +3366,7 @@ canvas.addEventListener('click', (e) => {
     const ccx = (e.clientX - cr.left) * WIDTH / cr.width;
     const ccy = (e.clientY - cr.top) * HEIGHT / cr.height;
     if (ccx < 280 && ccy > HEIGHT - 50) {
-      stopIntroMusic();
-      game.screen = 'title';
-      introScene = 0;
+      finishIntro();
       return;
     }
     // First click on any scene: just unlock audio and start music, don't advance
@@ -3360,9 +3375,7 @@ canvas.addEventListener('click', (e) => {
       return;
     }
     if (introScene >= 5) {
-      stopIntroMusic();
-      game.screen = 'title';
-      introScene = 0;
+      finishIntro();
     } else {
       introScene++;
       introTimer = 0;
@@ -3373,6 +3386,14 @@ canvas.addEventListener('click', (e) => {
     return;
   }
   if (game.screen === 'title') {
+    // "📖 Priča" button (bottom-left) replays the intro cutscene
+    const tr = canvas.getBoundingClientRect();
+    const tcx = (e.clientX - tr.left) * WIDTH / tr.width;
+    const tcy = (e.clientY - tr.top) * HEIGHT / tr.height;
+    if (tcx >= 20 && tcx <= 175 && tcy >= HEIGHT - 58 && tcy <= HEIGHT - 16) {
+      replayIntro();
+      return;
+    }
     playOink();
     resetRun();
     // Auto-fullscreen on mobile game start
@@ -5972,18 +5993,22 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // Sun/moon using biome sun color
+  // Sun/moon using biome sun color. Kept away from the top-right corner -
+  // the lives, player name and the fixed fullscreen button live there, and a
+  // bright yellow disc underneath them made the HUD unreadable.
+  const sunX = WIDTH - 290;
+  const sunY = 55;
   ctx.fillStyle = b.sunColor;
   ctx.beginPath();
-  ctx.arc(WIDTH - 60, 50, 30, 0, Math.PI * 2);
+  ctx.arc(sunX, sunY, 30, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = b.sunColor;
   ctx.lineWidth = 2;
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2 + Date.now() / 3000;
     ctx.beginPath();
-    ctx.moveTo(WIDTH - 60 + Math.cos(angle) * 35, 50 + Math.sin(angle) * 35);
-    ctx.lineTo(WIDTH - 60 + Math.cos(angle) * 48, 50 + Math.sin(angle) * 48);
+    ctx.moveTo(sunX + Math.cos(angle) * 35, sunY + Math.sin(angle) * 35);
+    ctx.lineTo(sunX + Math.cos(angle) * 48, sunY + Math.sin(angle) * 48);
     ctx.stroke();
   }
 
@@ -7697,10 +7722,21 @@ function drawHUD() {
   // fullscreen button doesn't cover the last life)
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
-  const crackStartX = mHud ? WIDTH - 95 : WIDTH - 15;
+  // Desktop is inset too (WIDTH - 75, not WIDTH - 15): the fixed fullscreen
+  // button sits over the very corner and used to cover the last life
+  const crackStartX = mHud ? WIDTH - 95 : WIDTH - 75;
   ctx.font = lifeFont;
   const crackSpacing = mHud ? 36 : 28;
   const maxCr = game.maxCracks || 3;
+  // Dark pill behind the lives row (and the player name under it) so the most
+  // important info in the game never sinks into a bright biome sky
+  const livesPillLeft = crackStartX - (maxCr - 1) * crackSpacing - (mHud ? 36 : 28);
+  const livesPillH = playerName ? (mHud ? 56 : 52) : (mHud ? 44 : 32);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(livesPillLeft, 8, crackStartX - livesPillLeft + 10, livesPillH, 10);
+  ctx.fill();
+  ctx.font = lifeFont;
   for (let i = 0; i < maxCr; i++) {
     const cx = crackStartX - (maxCr - 1 - i) * crackSpacing;
     if (i < game.cracks) {
@@ -7829,15 +7865,15 @@ function drawHUD() {
   ctx.fillStyle = '#F7931A';
   ctx.fillText('\u20BF ' + playerBTC, hudL + 15, btcY);
 
-  // Player name (top-right, below crack indicators)
+  // Player name (top-right, below crack indicators, on the same dark pill)
   if (playerName) {
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText(playerName, crackStartX - 1, 46);
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(playerName, crackStartX, 45);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText(playerName, crackStartX - 1, mHud ? 47 : 43);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(playerName, crackStartX, mHud ? 46 : 42);
   }
 
   // Active shield indicator
@@ -8201,7 +8237,7 @@ function drawHelpScreen() {
   y += 22;
   ctx.font = '15px sans-serif';
   ctx.fillStyle = '#ddd';
-  ctx.fillText('Skupljaj materijale: 5\uD83C\uDF3E = ku\u0107a od slame (2 HP) | 7\uD83E\uDEB5 = brvnara (3 HP) | 10\uD83E\uDDF1 = ku\u0107a od cigle (6 HP)', WIDTH / 2, y);
+  ctx.fillText('Skupljaj materijale pa ' + (isMobile ? 'pritisni \uD83C\uDFE0 KU\u0106A' : 'pritisni K') + ': 5\uD83C\uDF3E = slama (2 HP) | 7\uD83E\uDEB5 = brvnara (3 HP) | 10\uD83E\uDDF1 = cigla (6 HP)', WIDTH / 2, y);
   y += 20;
   ctx.fillText('Vuk duva ku\u0107ice! Slamu oduva odmah, pru\u0107e posle 3 duvanja, cigle NE MO\u017DE!', WIDTH / 2, y);
 
@@ -9751,25 +9787,26 @@ function drawIntroScene5(t) {
   // "Klikni za pocetak" premium button
   const btnY = HEIGHT - 50;
   const pulse = Math.sin(t * 3) * 0.15 + 0.85;
-  // Glow ring
+  // Glow ring (wide enough for the "Klikni ili SPACE" desktop label)
+  const startBtnW = isMobile ? 240 : 300;
   ctx.strokeStyle = `rgba(255, 102, 153, ${pulse * 0.5})`;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 130, btnY - 20, 260, 40, 20);
+  ctx.roundRect(WIDTH / 2 - startBtnW / 2 - 10, btnY - 20, startBtnW + 20, 40, 20);
   ctx.stroke();
   // Button fill
-  const btnGrad = ctx.createLinearGradient(WIDTH / 2 - 120, btnY - 18, WIDTH / 2 + 120, btnY + 18);
+  const btnGrad = ctx.createLinearGradient(WIDTH / 2 - startBtnW / 2, btnY - 18, WIDTH / 2 + startBtnW / 2, btnY + 18);
   btnGrad.addColorStop(0, '#FF6699');
   btnGrad.addColorStop(1, '#FF3377');
   ctx.fillStyle = btnGrad;
   ctx.beginPath();
-  ctx.roundRect(WIDTH / 2 - 120, btnY - 16, 240, 34, 17);
+  ctx.roundRect(WIDTH / 2 - startBtnW / 2, btnY - 16, startBtnW, 34, 17);
   ctx.fill();
   ctx.font = 'bold 18px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
-  ctx.fillText('\u25B6 Klikni za po\u010Detak!', WIDTH / 2, btnY);
+  ctx.fillText(isMobile ? '\u25B6 Tapni za po\u010Detak!' : '\u25B6 Klikni ili SPACE za po\u010Detak!', WIDTH / 2, btnY);
 }
 
 function drawIntro() {
@@ -10166,6 +10203,31 @@ function drawTitle() {
       ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')' + (entry.btc ? '  ₿' + entry.btc : ''), WIDTH / 2, HEIGHT - 145 + li * 22);
     }
   }
+
+  // Quick controls line - a player who skipped the intro must still be able
+  // to learn the basics BEFORE the first devil lands on their back
+  ctx.font = '15px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    isMobile
+      ? '◀ ▶ kretanje · SKOK · PRDNI \u{1F4A8} · SERI \u{1F4A9} · dugmad na ekranu!'
+      : '← → kretanje · ↑ skok · ↑↓ tresi đavola · SPACE prdež \u{1F4A8} · SHIFT kaka \u{1F4A9} · ESC pravila',
+    WIDTH / 2, HEIGHT - 25);
+
+  // "📖 Priča" button (bottom-left) - replays the intro cutscene
+  // (hit-rect checked in the canvas click handler: 20..175 x HEIGHT-58..HEIGHT-16)
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(20, HEIGHT - 58, 155, 42, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('\u{1F4D6} Priča', 97, HEIGHT - 36);
+  ctx.lineWidth = 1;
 }
 
 // --- Draw House ---
@@ -12005,6 +12067,20 @@ function drawGameOver() {
     ctx.restore();
   }
 
+  // While the angel sequence plays there is deliberately no restart button -
+  // but a silent screen looks frozen, so tell the player to hang on
+  if (resurrectionState !== 'done' && resurrectionState !== 'none') {
+    const waitPulse = 0.4 + 0.3 * Math.abs(Math.sin(Date.now() / 400));
+    ctx.save();
+    ctx.globalAlpha = waitPulse;
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('\u{1F47C} Sačekaj... anđeo odlučuje o tvojoj sudbini!', WIDTH / 2, 105);
+    ctx.restore();
+  }
+
   // Restart prompt - BIG TAP BUTTON (only when resurrection sequence is done)
   if (resurrectionState === 'done') {
     const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
@@ -12033,12 +12109,12 @@ function drawGameOver() {
 // --- Name Input Handlers ---
 document.getElementById('nameSubmitBtn').addEventListener('click', function() {
   const name = document.getElementById('playerNameInput').value.trim();
-  if (name.length > 0) {
-    playerName = name;
-    localStorage.setItem('kasicaPlayerName', playerName);
-    hideNameInput();
-    game.screen = 'intro';
-  }
+  // An empty name must never silently dead-end the very first screen a child
+  // sees - fall back to a cute default and let them play.
+  playerName = name.length > 0 ? name : 'Prasence';
+  localStorage.setItem('kasicaPlayerName', playerName);
+  hideNameInput();
+  game.screen = 'intro';
 });
 
 document.getElementById('playerNameInput').addEventListener('keydown', function(e) {
@@ -12052,6 +12128,10 @@ document.getElementById('playerNameInput').addEventListener('keydown', function(
 if (!playerName) {
   game.screen = 'nameInput';
   showNameInput();
+} else if (localStorage.getItem('kasicaIntroSeen')) {
+  // Returning player: straight to the title - no 6-scene toll booth before
+  // every session. The story stays one click away ("📖 Priča" on the title).
+  game.screen = 'title';
 } else {
   game.screen = 'intro';
 }
