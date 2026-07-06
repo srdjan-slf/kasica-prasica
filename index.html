@@ -501,7 +501,7 @@ let victoryFlawless = false; // did the final level earn the flawless bonus?
 
 const SHOP_ITEMS = [
   { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
-  { id: 'doubleScore', name: '2x Score', desc: 'Dupli poeni na slede\u0107em nivou', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
+  { id: 'doubleScore', name: '2x Poeni', desc: 'Dupli poeni (1 nivo)', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
   { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak na slede\u0107em nivou', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; } },
   { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } },
@@ -1069,6 +1069,151 @@ function initAmbientParticles() {
   }
 }
 
+// --- Biome backdrop silhouettes ---
+// Each biome gets one static layer of distant scenery (hills / pines /
+// skyline / mountains / volcano / cloud towers). Rendered ONCE per biome to
+// an offscreen canvas and blitted each frame - one drawImage per frame, so
+// the visual depth is basically free.
+let biomeBackdropCanvas = null;
+let biomeBackdropFor = null;
+
+function renderBiomeBackdrop() {
+  if (!biomeBackdropCanvas) {
+    biomeBackdropCanvas = document.createElement('canvas');
+    biomeBackdropCanvas.width = WIDTH;
+    biomeBackdropCanvas.height = HEIGHT;
+  }
+  const bc = biomeBackdropCanvas.getContext('2d');
+  bc.clearRect(0, 0, WIDTH, HEIGHT);
+  const base = HEIGHT - 40; // top edge of the ground strip
+
+  // Smooth double-sine hill outline from x=0..WIDTH down to the ground
+  function hillLayer(color, amp, top, phase) {
+    bc.fillStyle = color;
+    bc.beginPath();
+    bc.moveTo(0, base);
+    for (let x = 0; x <= WIDTH; x += 16) {
+      bc.lineTo(x, top + Math.sin(x / 140 + phase) * amp + Math.sin(x / 57 + phase * 2) * amp * 0.3);
+    }
+    bc.lineTo(WIDTH, base);
+    bc.closePath();
+    bc.fill();
+  }
+
+  if (currentBiome === BIOMES.livada) {
+    hillLayer('rgba(70,150,80,0.40)', 26, base - 130, 1.2);
+    // Round trees dotted along the far hill
+    bc.fillStyle = 'rgba(40,110,55,0.45)';
+    for (let i = 0; i < 7; i++) {
+      const tx = 90 + i * 170;
+      const ty = base - 120 + Math.sin(tx / 140 + 1.2) * 22;
+      bc.fillRect(tx - 3, ty - 18, 6, 20);
+      bc.beginPath();
+      bc.arc(tx, ty - 28, 16, 0, Math.PI * 2);
+      bc.fill();
+    }
+    hillLayer('rgba(55,125,65,0.55)', 20, base - 60, 4.0);
+  } else if (currentBiome === BIOMES.suma) {
+    // Two rows of pine silhouettes, back row taller and lighter
+    function pineRow(color, h, step, off) {
+      bc.fillStyle = color;
+      for (let x = -step; x < WIDTH + step; x += step) {
+        const ph = h + Math.sin((x + off) / 83) * h * 0.25;
+        bc.beginPath();
+        bc.moveTo(x, base);
+        bc.lineTo(x + step * 0.5, base - ph);
+        bc.lineTo(x + step, base);
+        bc.closePath();
+        bc.fill();
+      }
+    }
+    pineRow('rgba(30,90,60,0.40)', 160, 96, 30);
+    pineRow('rgba(12,50,30,0.60)', 100, 62, 260);
+  } else if (currentBiome === BIOMES.grad) {
+    // Distant skyline with a scattering of lit windows
+    let bx = 0, bi = 0;
+    while (bx < WIDTH) {
+      const bw = 60 + ((bi * 37) % 70);
+      const bh = 90 + ((bi * 53) % 140);
+      bc.fillStyle = 'rgba(18,18,32,0.65)';
+      bc.fillRect(bx, base - bh, bw, bh);
+      bc.fillStyle = 'rgba(255,220,120,0.40)';
+      for (let wy = base - bh + 10; wy < base - 14; wy += 18) {
+        for (let wx = bx + 8; wx < bx + bw - 10; wx += 16) {
+          if (((wx * 7 + wy * 13) % 5) < 2) bc.fillRect(wx, wy, 6, 8);
+        }
+      }
+      bx += bw + 12;
+      bi++;
+    }
+  } else if (currentBiome === BIOMES.sneg) {
+    // Jagged mountain range with snow caps on the tall peaks
+    const pts = [[0, base - 120], [140, base - 260], [300, base - 150], [460, base - 300], [640, base - 170], [820, base - 280], [1000, base - 160], [1200, base - 240]];
+    bc.fillStyle = 'rgba(75,90,125,0.55)';
+    bc.beginPath();
+    bc.moveTo(0, base);
+    for (const p of pts) bc.lineTo(p[0], p[1]);
+    bc.lineTo(WIDTH, base);
+    bc.closePath();
+    bc.fill();
+    bc.fillStyle = 'rgba(240,246,255,0.75)';
+    for (const p of pts) {
+      if (p[1] < base - 200) {
+        bc.beginPath();
+        bc.moveTo(p[0], p[1]);
+        bc.lineTo(p[0] - 34, p[1] + 46);
+        bc.lineTo(p[0] - 12, p[1] + 36);
+        bc.lineTo(p[0], p[1] + 52);
+        bc.lineTo(p[0] + 12, p[1] + 36);
+        bc.lineTo(p[0] + 34, p[1] + 46);
+        bc.closePath();
+        bc.fill();
+      }
+    }
+  } else if (currentBiome === BIOMES.pakao) {
+    // Volcano with a glowing mouth
+    bc.fillStyle = 'rgba(15,0,0,0.70)';
+    bc.beginPath();
+    bc.moveTo(700, base);
+    bc.lineTo(840, base - 220);
+    bc.lineTo(900, base - 220);
+    bc.lineTo(1040, base);
+    bc.closePath();
+    bc.fill();
+    bc.fillStyle = 'rgba(255,90,0,0.55)';
+    bc.beginPath();
+    bc.ellipse(870, base - 220, 36, 10, 0, 0, Math.PI * 2);
+    bc.fill();
+    // Jagged rock spikes along the horizon
+    bc.fillStyle = 'rgba(25,2,0,0.75)';
+    for (let i = 0; i < 14; i++) {
+      const sx = i * 90 + ((i * 31) % 40);
+      const sh = 60 + ((i * 47) % 110);
+      bc.beginPath();
+      bc.moveTo(sx, base);
+      bc.lineTo(sx + 25, base - sh);
+      bc.lineTo(sx + 55, base);
+      bc.closePath();
+      bc.fill();
+    }
+  } else if (currentBiome === BIOMES.oblaci) {
+    // Distant towers of stacked cumulus
+    bc.fillStyle = 'rgba(255,255,255,0.50)';
+    for (let i = 0; i < 6; i++) {
+      const cx = 100 + i * 200;
+      const ch = 90 + ((i * 61) % 120);
+      for (let s = 0; s < 4; s++) {
+        const r = 46 - s * 8;
+        bc.beginPath();
+        bc.arc(cx + ((s * 23) % 17) - 8, base - 30 - s * (ch / 4), r, 0, Math.PI * 2);
+        bc.fill();
+      }
+    }
+  }
+
+  biomeBackdropFor = currentBiome;
+}
+
 // --- Boss Fight System ---
 let boss = null;
 let bossActive = false;
@@ -1099,26 +1244,28 @@ const BOSS_TYPES = {
     reward: 25
   },
   kraljDjavola: {
+    // Level 9 (Pakao) - the devil king fights on his home turf
     name: 'KRALJ \u0110AVOLA',
     emoji: '\u{1F47F}',
-    hp: 24, maxHp: 24,
+    hp: 28, maxHp: 28,
     speed: 72,
     size: 110,
     attacks: ['fireball', 'teleport', 'summon', 'rain'],
-    level: 7,
+    level: 9,
     color: '#440000',
-    reward: 40
+    reward: 45
   },
   zloFarmer: {
+    // Level 7 (Sne\u017Ena Planina) - a farmer on a snowy mountain farm
     name: 'ZLO FARMER',
     emoji: '\u{1F468}\u200D\u{1F33E}',
-    hp: 28, maxHp: 28,
+    hp: 24, maxHp: 24,
     speed: 76,
     size: 85,
     attacks: ['pitchfork', 'charge', 'trap', 'slam'],
-    level: 9,
+    level: 7,
     color: '#4A3000',
-    reward: 45
+    reward: 40
   },
   kraljKlanice: {
     // Final boss - one attack borrowed from every boss before him,
@@ -1138,8 +1285,10 @@ const BOSS_TYPES = {
 function getBossForLevel(level) {
   if (level === 3) return 'velikiVuk';
   if (level === 5) return 'megaKasapin';
-  if (level === 7) return 'kraljDjavola';
-  if (level === 9) return 'zloFarmer';
+  // Thematic pairing with the biomes: the farmer belongs on his snowy farm
+  // (level 7 = Snežna Planina), the devil king belongs in hell (level 9 = Pakao)
+  if (level === 7) return 'zloFarmer';
+  if (level === 9) return 'kraljDjavola';
   if (level === 10) return 'kraljKlanice';
   return null;
 }
@@ -3952,7 +4101,7 @@ function triggerDamage(fromBomb) {
   if (hasShield) {
     hasShield = false;
     spawnParticles(player.x, player.y, '\uD83D\uDEE1\uFE0F', 4, 150);
-    spawnScorePopup(player.x, player.y - 30, '\uD83D\uDEE1\uFE0F Blocked!', '#4488ff');
+    spawnScorePopup(player.x, player.y - 30, '\uD83D\uDEE1\uFE0F Blokirano!', '#4488ff');
     triggerScreenShake(3, 0.15);
     return;
   }
@@ -4043,7 +4192,7 @@ function updateBoss(dt) {
       bossDefeatedThisLevel = true;
       bossActive = false;
       playerBTC += boss.reward;
-      spawnScorePopup(boss.x, boss.y, '+' + boss.reward + ' \u20BF BOSS DEFEATED!', '#FFD700');
+      spawnScorePopup(boss.x, boss.y, '+' + boss.reward + ' \u20BF BOSS POBE\u0110EN!', '#FFD700');
       for (let i = 0; i < 20; i++) {
         spawnParticles(boss.x + (Math.random()-0.5)*80, boss.y + (Math.random()-0.5)*80, '\u{1F4A5}', 1, 200);
       }
@@ -4083,7 +4232,7 @@ function updateBoss(dt) {
   if (!boss.phaseTwo && boss.hp <= boss.maxHp / 2) {
     boss.phaseTwo = true;
     boss.speed *= 1.4;
-    spawnScorePopup(boss.x, boss.y - 40, 'PHASE 2! \u{1F525}', '#FF4400');
+    spawnScorePopup(boss.x, boss.y - 40, 'FAZA 2! \u{1F525}', '#FF4400');
     triggerScreenShake(8, 0.4);
   }
 
@@ -4793,7 +4942,7 @@ function update(dt) {
       // lock the bonus out for the whole rest of the run
       if (!game.tookHitThisLevel) {
         playerBTC += 5;
-        spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Flawless!', '#F7931A');
+        spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Bez gre\u0161ke!', '#F7931A');
       }
       // Level complete confetti particles
       const confettiEmojis = ['\u{1F389}', '\u{1F38A}', '\u2728', '\u{1F389}', '\u{1F38A}', '\u2728'];
@@ -6012,6 +6161,10 @@ function drawBackground() {
     ctx.stroke();
   }
 
+  // Distant biome silhouettes (offscreen canvas, one drawImage per frame)
+  if (biomeBackdropFor !== currentBiome) renderBiomeBackdrop();
+  ctx.drawImage(biomeBackdropCanvas, 0, 0);
+
   // Ambient particles (biome-specific)
   drawAmbientParticles();
 }
@@ -6854,11 +7007,15 @@ function drawVeganSprite(x, y, dir, animTimer, state) {
   ctx.arc(1, -19, 5, 0.1, Math.PI - 0.1);
   ctx.stroke();
 
-  // "VEGAN" text on shirt
+  // "VEGAN" text on shirt - counter-flip so it never reads "NAGEV" in the
+  // mirror when he walks left
+  ctx.save();
+  if (dir < 0) ctx.scale(-1, 1);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 7px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('VEGAN', 1, -2);
+  ctx.fillText('VEGAN', dir < 0 ? -1 : 1, -2);
+  ctx.restore();
 
   // Peace sign if defending
   if (state === 'defend') {
@@ -7634,14 +7791,23 @@ function drawHUD() {
   // top-left corner, so the HUD moves right to stay readable/tappable
   const hudL = mHud ? 75 : 0;
 
+  // Dark pill behind the whole left HUD block (score / farts / BTC /
+  // materials) - fixed colors like white score text and brown materials were
+  // unreadable on the bright Oblaci / Sneg skies and the dark Pakao sky.
+  // Same styling as the lives pill on the right, so the HUD reads as one system.
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.roundRect(hudL + 8, 8, mHud ? 390 : 355, mHud ? 126 : 110, 10);
+  ctx.fill();
+
   // Top-left: Score with bouncing coin icon
   const coinBounce = Math.sin(Math.max(0, scoreBounceFactor) * Math.PI) * 5;
   hudText('\u{1FA99}', hudL + 15, 12 - coinBounce, scoreLabelFont, '#fff', 'left');
-  hudText(' Score: ' + game.score, hudL + (mHud ? 48 : 38), 14, scoreFont, '#fff', 'left');
+  hudText(' Poeni: ' + game.score, hudL + (mHud ? 48 : 38), 14, scoreFont, '#fff', 'left');
 
   // Top-center: Level with rounded background
   ctx.textAlign = 'center';
-  const levelText = 'Level ' + game.level + (bossActive ? ' \u26A0\uFE0F BOSS' : ' - ' + currentBiome.name);
+  const levelText = 'Nivo ' + game.level + (bossActive ? ' \u26A0\uFE0F BOSS' : ' - ' + currentBiome.name);
   ctx.font = levelFont;
   const levelTextW = ctx.measureText(levelText).width;
   // Rounded background pill
@@ -7663,6 +7829,11 @@ function drawHUD() {
     const bw = 280, bh = 14;
     const bbx = WIDTH / 2 - bw / 2;
     const bby = 40;
+    // Contrast pill behind the bar + name label (readable on every biome sky)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.roundRect(WIDTH / 2 - 175, 36, 350, mHud ? 48 : 42, 10);
+    ctx.fill();
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.beginPath();
     ctx.roundRect(bbx - 2, bby - 2, bw + 4, bh + 4, 7);
@@ -7692,6 +7863,13 @@ function drawHUD() {
     const timerBarX = WIDTH / 2 - timerBarWidth / 2;
     const timerBarY = 40;
     const timerFill = Math.min(1, Math.max(0, game.levelTimer / (game.levelConfig.duration + (isBossLevel(game.level) ? 15 : 0))));
+
+    // Contrast pill behind the bar + seconds text (white '84s' used to vanish
+    // against the bright Oblaci sky)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.roundRect(WIDTH / 2 - 95, 36, 190, mHud ? 46 : 38, 10);
+    ctx.fill();
 
     ctx.fillStyle = '#333';
     ctx.beginPath();
@@ -7778,11 +7956,12 @@ function drawHUD() {
       ctx.fill();
     }
   }
-  // Show corn hint when low on farts
+  // Show corn hint when low on farts (past the wet-fart counter at hudL+180,
+  // which it used to blink right on top of)
   if (fartCharges === 0) {
     const blink = Math.sin(Date.now() / 300) > 0;
     if (blink) {
-      hudText('Uhvati \u{1F33D}!', hudL + 155, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
+      hudText('Uhvati \u{1F33D}!', hudL + 258, fartY + 2, 'bold 16px sans-serif', '#ffcc00', 'left');
     }
   }
 
@@ -7950,8 +8129,14 @@ function drawShop() {
     ctx.fillStyle = canBuy ? '#fff' : '#555';
     ctx.fillText(item.name, x + cardW / 2, y + (isMobile ? 80 : 65));
 
-    // Description
-    ctx.font = `${isMobile ? 13 : 11}px sans-serif`;
+    // Description - shrink the font until it fits inside the card, so no
+    // description ever bleeds into the neighbouring cards
+    var descSize = isMobile ? 13 : 11;
+    ctx.font = `${descSize}px sans-serif`;
+    while (descSize > 8 && ctx.measureText(item.desc).width > cardW - 12) {
+      descSize--;
+      ctx.font = `${descSize}px sans-serif`;
+    }
     ctx.fillStyle = canBuy ? '#aaa' : '#444';
     ctx.fillText(item.desc, x + cardW / 2, y + (isMobile ? 100 : 82));
 
@@ -7977,7 +8162,7 @@ function drawShop() {
       ctx.fillStyle = '#aaa';
       if (wetFartBossFree) {
         ctx.font = `bold ${isMobile ? 13 : 10}px sans-serif`;
-        ctx.fillText('BOSS PUNI FREE', x + cardW / 2, buyBtnY + buyBtnH / 2);
+        ctx.fillText('BOSS PUNI DŽABE', x + cardW / 2, buyBtnY + buyBtnH / 2);
       } else {
         ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
         ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
@@ -8027,7 +8212,7 @@ function drawShop() {
   ctx.lineWidth = 2;
   const nextBiome = getBiomeForLevel(game.level + 1);
   const nextBossKey = getBossForLevel(game.level + 1);
-  let skipLabel = '\u25B6 Level ' + (game.level + 1) + ' - ' + nextBiome.name;
+  let skipLabel = '\u25B6 Nivo ' + (game.level + 1) + ' - ' + nextBiome.name;
   if (nextBossKey) skipLabel += ' \u26A0\uFE0F BOSS!';
   ctx.strokeText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
   ctx.fillText(skipLabel, WIDTH / 2, skipY + skipBtnH / 2);
@@ -8039,7 +8224,7 @@ function drawShop() {
   ctx.fillStyle = '#aaa';
   ctx.textAlign = 'center';
   var activeText = 'Aktivno: ';
-  if (scoreMultiplier > 1) activeText += '2x Score ';
+  if (scoreMultiplier > 1) activeText += '2x Poeni ';
   if (hasShield) activeText += '\uD83D\uDEE1\uFE0F ';
   if (turboFart) activeText += '\uD83D\uDCA8\uD83D\uDCA8 ';
   if (megaPoop) activeText += '\uD83D\uDCA9\uD83D\uDCA9 ';
@@ -8047,7 +8232,8 @@ function drawShop() {
   // Current supplies - so wet fart / extra life purchases are never made blind
   activeText += '   |   \uD83D\uDCA6 ' + wetFartCharges + '/' + MAX_WET_FARTS
     + '   \u2764\uFE0F ' + Math.max(0, (game.maxCracks || 3) - game.cracks) + '/' + (game.maxCracks || 3);
-  ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
+  // Above the skip button (it used to be drawn half-inside its bottom edge)
+  ctx.fillText(activeText, WIDTH / 2, skipY - 16);
 
   // Help hint (mobile has no ESC key - point at the ? button instead)
   ctx.font = '13px sans-serif';
@@ -9894,9 +10080,13 @@ function drawIntro() {
       ctx.globalAlpha = lineAlpha;
       ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.lineWidth = 3;
-      ctx.strokeText(scene.lines[i], WIDTH / 2, HEIGHT - 80 + i * 30);
+      // Anchor the BLOCK's last line just above the letterbox bar - 3-line
+      // scenes used to push their last line under the bar and the
+      // "Klikni za zvuk!" hint
+      const lineY = HEIGHT - 50 - (scene.lines.length - i) * 30;
+      ctx.strokeText(scene.lines[i], WIDTH / 2, lineY);
       ctx.fillStyle = '#fff';
-      ctx.fillText(scene.lines[i], WIDTH / 2, HEIGHT - 80 + i * 30);
+      ctx.fillText(scene.lines[i], WIDTH / 2, lineY);
     }
     ctx.lineWidth = 1;
     ctx.restore();
@@ -10159,11 +10349,17 @@ function drawTitle() {
 
   // Player greeting + lifetime bank balance (all BTC ever earned across runs)
   if (playerName || totalBTC > 0) {
-    ctx.font = '18px sans-serif';
-    ctx.fillStyle = '#aaa';
+    // Dark text with a soft white outline - the old #aaa on the light blue
+    // sky was nearly invisible, and y+40 leaned on the start button below
+    ctx.font = 'bold 18px sans-serif';
     let greetLine = playerName ? 'Igra\u010D: ' + playerName : '';
     if (totalBTC > 0) greetLine += (greetLine ? '   \u00B7   ' : '') + '\uD83C\uDFE6 Banka: \u20BF ' + totalBTC;
-    ctx.fillText(greetLine, WIDTH / 2, HEIGHT / 2 + 40);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(greetLine, WIDTH / 2, HEIGHT / 2 + 35);
+    ctx.fillStyle = '#2d2d2d';
+    ctx.fillText(greetLine, WIDTH / 2, HEIGHT / 2 + 35);
+    ctx.lineWidth = 1;
   }
 
   // Start prompt - BIG TAP BUTTON
@@ -10200,7 +10396,7 @@ function drawTitle() {
       var entry = lb[li];
       var medal = li === 0 ? '\uD83E\uDD47' : li === 1 ? '\uD83E\uDD48' : li === 2 ? '\uD83E\uDD49' : '  ';
       ctx.fillStyle = li === 0 ? '#FFD700' : li === 1 ? '#C0C0C0' : li === 2 ? '#CD7F32' : '#aaa';
-      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')' + (entry.btc ? '  ₿' + entry.btc : ''), WIDTH / 2, HEIGHT - 145 + li * 22);
+      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' poena (nivo ' + entry.level + ')' + (entry.btc ? '  ₿' + entry.btc : ''), WIDTH / 2, HEIGHT - 145 + li * 22);
     }
   }
 
@@ -10886,6 +11082,19 @@ function drawPlayingScene() {
   // Latched devil on top of player
   if (game.latchedDevil) {
     const devil = game.latchedDevil;
+
+    // Pulsing red danger vignette on the screen edges - the latched sprite
+    // alone is easy to miss, this makes the "shake NOW" urgency readable even
+    // in peripheral vision, and it intensifies as heart loss approaches
+    const dangerT = Math.min(devil.hammerTimer / devil.hammerTimeout, 1.0);
+    const dangerPulse = 0.7 + 0.3 * Math.sin(Date.now() / 120);
+    const dangerInt = (0.12 + dangerT * 0.33) * dangerPulse;
+    const dvg = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.35, WIDTH / 2, HEIGHT / 2, HEIGHT * 0.85);
+    dvg.addColorStop(0, 'rgba(255,0,0,0)');
+    dvg.addColorStop(1, 'rgba(255,0,0,' + dangerInt.toFixed(3) + ')');
+    ctx.fillStyle = dvg;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
     const devilFontSize = devil.devilType === 'heavy' ? 44 : (devil.devilType === 'thief' ? 40 : 36);
     ctx.font = devilFontSize + 'px sans-serif';
     ctx.textAlign = 'center';
@@ -11415,27 +11624,29 @@ function drawVictory() {
   ctx.lineTo(0, HEIGHT);
   ctx.fill();
 
-  // Red American barn
+  // Red American barn - sits lower on the hills so its roof stays clear of
+  // the title/score/thank-you text stack at the top of the screen
+  const barnTop = HEIGHT * 0.4;
   ctx.fillStyle = '#B22222';
-  ctx.fillRect(WIDTH / 2 - 80, HEIGHT * 0.35, 160, 100);
+  ctx.fillRect(WIDTH / 2 - 80, barnTop, 160, 100);
   // Roof
   ctx.fillStyle = '#8B0000';
   ctx.beginPath();
-  ctx.moveTo(WIDTH / 2 - 100, HEIGHT * 0.35);
-  ctx.lineTo(WIDTH / 2, HEIGHT * 0.25);
-  ctx.lineTo(WIDTH / 2 + 100, HEIGHT * 0.35);
+  ctx.moveTo(WIDTH / 2 - 100, barnTop);
+  ctx.lineTo(WIDTH / 2, barnTop - 60);
+  ctx.lineTo(WIDTH / 2 + 100, barnTop);
   ctx.fill();
   // Barn door
   ctx.fillStyle = '#5B1010';
-  ctx.fillRect(WIDTH / 2 - 20, HEIGHT * 0.35 + 40, 40, 60);
+  ctx.fillRect(WIDTH / 2 - 20, barnTop + 40, 40, 60);
   // White X on barn
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 10);
-  ctx.lineTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 90);
-  ctx.moveTo(WIDTH / 2 + 60, HEIGHT * 0.35 + 10);
-  ctx.lineTo(WIDTH / 2 - 60, HEIGHT * 0.35 + 90);
+  ctx.moveTo(WIDTH / 2 - 60, barnTop + 10);
+  ctx.lineTo(WIDTH / 2 + 60, barnTop + 90);
+  ctx.moveTo(WIDTH / 2 + 60, barnTop + 10);
+  ctx.lineTo(WIDTH / 2 - 60, barnTop + 90);
   ctx.stroke();
 
   // Barbed wire fence (on top of/replacing picket fence)
@@ -11638,16 +11849,16 @@ function drawVictory() {
   ctx.fillStyle = '#FFD700';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.strokeText('Final Score: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
-  ctx.fillText('Final Score: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+  ctx.strokeText('Ukupno poena: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+  ctx.fillText('Ukupno poena: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
 
   // Flawless bonus on the final level must be celebrated, not silent
   if (victoryFlawless) {
     ctx.font = 'bold 20px sans-serif';
     ctx.fillStyle = '#F7931A';
     ctx.lineWidth = 2;
-    ctx.strokeText('⭐ Flawless bonus: +5 ₿', WIDTH / 2, 185);
-    ctx.fillText('⭐ Flawless bonus: +5 ₿', WIDTH / 2, 185);
+    ctx.strokeText('⭐ Bonus bez greške: +5 ₿', WIDTH / 2, 150);
+    ctx.fillText('⭐ Bonus bez greške: +5 ₿', WIDTH / 2, 150);
   }
 
   // Thank you message (fades in after 3 seconds)
@@ -11657,8 +11868,8 @@ function drawVictory() {
     ctx.fillStyle = '#ff6699';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
-    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
-    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 155);
+    ctx.strokeText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 178);
+    ctx.fillText('Hvala ti \u0161to si nam pomogao/la! \u2764\uFE0F', WIDTH / 2, 178);
     ctx.globalAlpha = 1;
   }
 
@@ -11731,9 +11942,9 @@ function drawLevelComplete() {
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 3;
   const biomeLabel = currentBiome.name;
-  const bossLabel = bossDefeatedThisLevel ? ' \u{1F3C6} BOSS DEFEATED!' : '';
-  ctx.strokeText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
-  ctx.fillText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
+  const bossLabel = bossDefeatedThisLevel ? ' \u{1F3C6} BOSS POBEĐEN!' : '';
+  ctx.strokeText('Nivo ' + game.level + ' (' + biomeLabel + ') završen!' + bossLabel, WIDTH / 2, 40);
+  ctx.fillText('Nivo ' + game.level + ' (' + biomeLabel + ') završen!' + bossLabel, WIDTH / 2, 40);
   ctx.lineWidth = 1;
 
   // Level earnings recap - celebrate what THIS level brought in, so players
@@ -11744,13 +11955,26 @@ function drawLevelComplete() {
   ctx.globalAlpha = recapAlpha;
   ctx.font = 'bold 20px sans-serif';
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('Ovaj nivo: ' + (scoreGain >= 0 ? '+' : '') + scoreGain + ' poena   \u00B7   ' + (btcGain >= 0 ? '+' : '') + btcGain + ' \u20BF', WIDTH / 2, HEIGHT - 110);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  const recapText = 'Ovaj nivo: ' + (scoreGain >= 0 ? '+' : '') + scoreGain + ' poena   \u00B7   ' + (btcGain >= 0 ? '+' : '') + btcGain + ' \u20BF';
+  const recapY = HEIGHT - (isMobile ? 160 : 110);
+  ctx.strokeText(recapText, WIDTH / 2, recapY);
+  ctx.fillText(recapText, WIDTH / 2, recapY);
   ctx.globalAlpha = 1.0;
+  ctx.lineWidth = 1;
 
-  // Score
+  // Total score - white with outline (the old #444 was invisible on the dark
+  // Suma/Grad/Pakao skies) and lifted clear of the "Dalje - Shop" button
   ctx.font = '28px sans-serif';
-  ctx.fillStyle = '#444';
-  ctx.fillText('\u{1FA99} Score: ' + game.score + '   \u20BF ' + playerBTC, WIDTH / 2, HEIGHT - 80);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  const totalsText = '\u{1FA99} Poeni: ' + game.score + '   \u20BF ' + playerBTC;
+  const totalsY = HEIGHT - (isMobile ? 195 : 145);
+  ctx.strokeText(totalsText, WIDTH / 2, totalsY);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(totalsText, WIDTH / 2, totalsY);
+  ctx.lineWidth = 1;
 
   // Next level prompt - BIG TAP BUTTON for mobile
   const pulse = 0.5 + 0.5 * Math.abs(Math.sin(Date.now() / 500));
@@ -11968,9 +12192,9 @@ function drawGameOver() {
   ctx.font = 'bold 48px sans-serif';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 4;
-  ctx.strokeText('\u{1F525} Game Over! \u{1F525}', WIDTH / 2, 60);
+  ctx.strokeText('\u{1F525} Kraj igre! \u{1F525}', WIDTH / 2, 60);
   ctx.fillStyle = '#ff4400';
-  ctx.fillText('\u{1F525} Game Over! \u{1F525}', WIDTH / 2, 60);
+  ctx.fillText('\u{1F525} Kraj igre! \u{1F525}', WIDTH / 2, 60);
   ctx.lineWidth = 1;
 
   // Sad message
@@ -11981,15 +12205,23 @@ function drawGameOver() {
   ctx.fillText('Kasica je zavr\u0161ila na ra\u017Enju...', WIDTH / 2, 105);
   ctx.globalAlpha = 1.0;
 
-  // Score info
-  ctx.font = '26px sans-serif';
-  ctx.fillStyle = '#dda050';
-  ctx.fillText('Level: ' + game.level + '   \u{1FA99} Score: ' + game.score, WIDTH / 2, HEIGHT - 55);
+  // Score info - kept ABOVE the "Nova igra" button (HEIGHT-120/70 upward),
+  // which used to be drawn right on top of these two lines
+  const goStatsY = HEIGHT - (isMobile ? 185 : 140);
+  ctx.font = 'bold 26px sans-serif';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 4;
+  ctx.strokeText('Nivo: ' + game.level + '   \u{1FA99} Poeni: ' + game.score, WIDTH / 2, goStatsY);
+  ctx.fillStyle = '#ffcc88';
+  ctx.fillText('Nivo: ' + game.level + '   \u{1FA99} Poeni: ' + game.score, WIDTH / 2, goStatsY);
 
   // BTC earned
-  ctx.font = '20px sans-serif';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.lineWidth = 3;
+  ctx.strokeText('\u20BF ' + playerBTC + ' Bitcoin zara\u0111eno', WIDTH / 2, goStatsY + 28);
   ctx.fillStyle = '#F7931A';
-  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin zaradjeno', WIDTH / 2, HEIGHT - 30);
+  ctx.fillText('\u20BF ' + playerBTC + ' Bitcoin zara\u0111eno', WIDTH / 2, goStatsY + 28);
+  ctx.lineWidth = 1;
 
   // --- Laughing devils around the spit ---
   for (const d of gameOverDevils) {
