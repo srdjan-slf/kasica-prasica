@@ -487,6 +487,7 @@ const game = {
 let playerName = localStorage.getItem('kasicaPlayerName') || '';
 let playerBTC = 0;
 let btcBanked = 0; // how much of playerBTC was already added to totalBTC this run
+let currentRunId = 0; // unique id per run - lets the leaderboard update one row per run
 let totalBTC = parseInt(localStorage.getItem('kasicaTotalBTC') || '0', 10);
 if (!Number.isFinite(totalBTC)) totalBTC = 0;
 
@@ -496,6 +497,7 @@ let hasShield = false;
 let turboFart = false;
 let megaPoop = false;
 let shopSkipRect = null;
+let victoryFlawless = false; // did the final level earn the flawless bonus?
 
 const SHOP_ITEMS = [
   { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
@@ -503,7 +505,7 @@ const SHOP_ITEMS = [
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
   { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak na slede\u0107em nivou', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; } },
   { id: 'megaPoop', name: 'Mega Govno', desc: 'Ve\u0107a zona smrada', icon: '\uD83D\uDCA9\uD83D\uDCA9', cost: 6, effect: function() { megaPoop = true; } },
-  { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 8, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
+  { id: 'wetFart', name: 'Vlažni Prdež', desc: '+2 vlažna prdeža', icon: '💦💨', cost: 6, effect: function() { wetFartCharges = Math.min(MAX_WET_FARTS, wetFartCharges + 2); } }
 ];
 
 function showNameInput() {
@@ -538,9 +540,14 @@ function saveToLeaderboard() {
       score: game.score,
       level: game.level,
       btc: playerBTC,
+      runId: currentRunId,
       date: new Date().toISOString().split('T')[0]
     };
-    let leaderboard = loadLeaderboard().slice();
+    // One row per run: death + resurrection + second death must UPDATE the
+    // existing row, not add a duplicate entry for the same run.
+    let leaderboard = loadLeaderboard().slice().filter(function(en) {
+      return !(en.runId && en.runId === currentRunId);
+    });
     leaderboard.push(entry);
     leaderboard.sort(function(a, b) { return b.score - a.score; });
     leaderboard = leaderboard.slice(0, 20);
@@ -2778,6 +2785,8 @@ function startLevel() {
   game.devilsSpawned = 0;
   game.latchedDevil = null;
   game.lastScore = game.score;
+  game.lastBTC = playerBTC; // snapshot AFTER shop purchases - level recap shows what the level itself earned
+  game.tookHitThisLevel = false; // flawless bonus is per-level, not per-run
 
   // Set biome for this level
   currentBiome = getBiomeForLevel(game.level);
@@ -2942,9 +2951,12 @@ function resetRun() {
   game.level = 1;
   game.cracks = 0;
   game.maxCracks = 3;
+  game.tookHitThisLevel = false;
   materials = { straw: 0, logs: 0, bricks: 0 };
   playerBTC = 0;
   btcBanked = 0;
+  currentRunId = Date.now();
+  victoryFlawless = false;
   scoreMultiplier = 1;
   hasShield = false;
   turboFart = false;
@@ -3000,13 +3012,22 @@ function toggleHelpOverlay() {
 // records entry time, so the same click/tap/keypress that opened the shop can
 // never immediately buy an item or hit the skip button.
 let shopEnteredAt = 0;
-// Gold flash on a card just bought with a digit key
+// Gold flash on a card just bought (digit key or click/tap)
 let shopFlashItem = null;
 let shopFlashUntil = 0;
+// Red flash on a card whose purchase failed (not enough BTC / already active)
+let shopErrorItem = null;
+let shopErrorUntil = 0;
+// Mobile two-tap purchase: first tap selects the card, second tap buys it -
+// so a curious tap "just to read the description" never spends BTC
+let shopSelectedItem = null;
 function enterShop() {
   shopSkipRect = null;
   SHOP_ITEMS.forEach(function(it) { it._rect = null; });
   shopEnteredAt = performance.now();
+  shopSelectedItem = null;
+  shopFlashItem = null;
+  shopErrorItem = null;
   game.screen = 'shop';
 }
 
@@ -3086,8 +3107,10 @@ window.addEventListener('keydown', (e) => {
       if (shopItem && playerBTC >= shopItem.cost && !isShopItemActive(shopItem)) {
         playerBTC -= shopItem.cost;
         shopItem.effect();
-        shopFlashItem = shopItem.id;
-        shopFlashUntil = performance.now() + 450;
+        shopBuySuccess(shopItem);
+      } else if (shopItem) {
+        // Not enough BTC or already active - clear "no sale" feedback
+        shopBuyFail(shopItem);
       }
     }
     return;
@@ -3887,6 +3910,7 @@ function triggerDamage(fromBomb) {
     return;
   }
   game.cracks++;
+  game.tookHitThisLevel = true; // no flawless bonus for this level
   game.score = Math.max(0, game.score - 5);
   invulnTimer = 1.0;
   flashTimer = 0.3;
@@ -4614,15 +4638,17 @@ function update(dt) {
     stopMusic();
     if (game.level >= 10) {
       game.screen = 'victory';
-      if (game.cracks === 0) { playerBTC += 5; }
+      // Flawless is per-LEVEL (no hit taken this level), not per-run
+      if (!game.tookHitThisLevel) { playerBTC += 5; victoryFlawless = true; }
       saveToLeaderboard();
       initVictoryScene();
     } else {
       game.screen = 'levelComplete';
       levelCompleteTimer = 0;
       playLevelComplete();
-      // Flawless level bonus
-      if (game.cracks === 0) {
+      // Flawless level bonus - per-LEVEL: one hit in level 1 must not
+      // lock the bonus out for the whole rest of the run
+      if (!game.tookHitThisLevel) {
         playerBTC += 5;
         spawnScorePopup(WIDTH / 2, HEIGHT / 2, '+5 \u20BF Flawless!', '#F7931A');
       }
@@ -5275,6 +5301,15 @@ function update(dt) {
         // Coin collected
         game.score += obj.value * scoreMultiplier;
         scoreBounceFactor = 1.0;
+        // A piggy bank that catches money should EARN money: gold and better
+        // (value >= 10) also pays out BTC, so every level funds one real shop
+        // decision instead of the shop being an empty storefront.
+        // (scoreMultiplier boosts score only - BTC income stays flat.)
+        if (obj.value >= 10) {
+          const btcGain = Math.floor(obj.value / 10); // gold +1, dollars +2, moneybag +3
+          playerBTC += btcGain;
+          spawnScorePopup(obj.x, obj.y - 32, '+' + btcGain + ' ₿', '#F7931A');
+        }
 
         // Particles + sound based on value
         if (obj.value === 1) {
@@ -7699,10 +7734,13 @@ function drawShop() {
     ctx.beginPath();
     ctx.roundRect(x, y, cardW, cardH, 10);
     ctx.fill();
-    // Gold flash right after a keyboard (digit) purchase
+    // Gold flash right after a purchase, red flash after a failed one,
+    // white highlight for the mobile "tap again to confirm" selection
     var flashing = shopFlashItem === item.id && performance.now() < shopFlashUntil;
-    ctx.strokeStyle = flashing ? '#fff' : (canBuy ? '#FFD700' : '#333');
-    ctx.lineWidth = flashing ? 5 : 2;
+    var errFlashing = shopErrorItem === item.id && performance.now() < shopErrorUntil;
+    var selected = isMobile && shopSelectedItem === item.id;
+    ctx.strokeStyle = flashing ? '#fff' : (errFlashing ? '#ff3333' : (selected ? '#7fe0ff' : (canBuy ? '#FFD700' : '#333')));
+    ctx.lineWidth = (flashing || errFlashing || selected) ? 5 : 2;
     ctx.stroke();
 
     // Keyboard hint: digit key buys this card (desktop only)
@@ -7741,7 +7779,9 @@ function drawShop() {
     var buyBtnY = y + (isMobile ? 150 : 125);
     var buyBtnX = x + (isMobile ? 10 : 20);
     var buyBtnW = cardW - (isMobile ? 20 : 40);
-    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS);
+    // Boss levels refill wet farts for free - warn instead of taking the money
+    var wetFartBossFree = item.id === 'wetFart' && wetFartCharges < MAX_WET_FARTS && !!getBossForLevel(game.level + 1);
+    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS) || wetFartBossFree;
     var isActive = !isMaxed && isShopItemActive(item);
     if (isMaxed) {
       ctx.fillStyle = '#555';
@@ -7749,8 +7789,13 @@ function drawShop() {
       ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
       ctx.fill();
       ctx.fillStyle = '#aaa';
-      ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
-      ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      if (wetFartBossFree) {
+        ctx.font = `bold ${isMobile ? 13 : 10}px sans-serif`;
+        ctx.fillText('BOSS PUNI FREE', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      } else {
+        ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
+        ctx.fillText('MAX', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      }
     } else if (isActive) {
       ctx.fillStyle = '#1d4d1d';
       ctx.beginPath();
@@ -7760,13 +7805,13 @@ function drawShop() {
       ctx.font = `bold ${isMobile ? 16 : 12}px sans-serif`;
       ctx.fillText('AKTIVNO', x + cardW / 2, buyBtnY + buyBtnH / 2);
     } else if (canBuy) {
-      ctx.fillStyle = '#F7931A';
+      ctx.fillStyle = selected ? '#4CAF50' : '#F7931A';
       ctx.beginPath();
       ctx.roundRect(buyBtnX, buyBtnY, buyBtnW, buyBtnH, 8);
       ctx.fill();
       ctx.fillStyle = '#000';
       ctx.font = `bold ${isMobile ? 18 : 13}px sans-serif`;
-      ctx.fillText('KUPI', x + cardW / 2, buyBtnY + buyBtnH / 2);
+      ctx.fillText(selected ? 'POTVRDI ✔' : 'KUPI', x + cardW / 2, buyBtnY + buyBtnH / 2);
     }
 
     // Store rect for click detection - entire card is tappable on mobile
@@ -7813,6 +7858,9 @@ function drawShop() {
   if (turboFart) activeText += '\uD83D\uDCA8\uD83D\uDCA8 ';
   if (megaPoop) activeText += '\uD83D\uDCA9\uD83D\uDCA9 ';
   if (activeText === 'Aktivno: ') activeText += 'ni\u0161ta';
+  // Current supplies - so wet fart / extra life purchases are never made blind
+  activeText += '   |   \uD83D\uDCA6 ' + wetFartCharges + '/' + MAX_WET_FARTS
+    + '   \u2764\uFE0F ' + Math.max(0, (game.maxCracks || 3) - game.cracks) + '/' + (game.maxCracks || 3);
   ctx.fillText(activeText, WIDTH / 2, HEIGHT - 25);
 
   // Help hint (mobile has no ESC key - point at the ? button instead)
@@ -7833,8 +7881,22 @@ function isShopItemActive(item) {
   if (item.id === 'turboFart') return turboFart;
   if (item.id === 'megaPoop') return megaPoop;
   if (item.id === 'extraLife') return game.maxCracks >= 6;
-  if (item.id === 'wetFart') return wetFartCharges >= MAX_WET_FARTS;
+  // Boss levels refill wet farts for free - buying them right before a boss
+  // would be wasted BTC, so the shop refuses to take the money
+  if (item.id === 'wetFart') return wetFartCharges >= MAX_WET_FARTS || !!getBossForLevel(game.level + 1);
   return false;
+}
+
+// Shop purchase feedback: gold flash + cha-ching on success, red flash + oink on failure
+function shopBuySuccess(item) {
+  shopFlashItem = item.id;
+  shopFlashUntil = performance.now() + 450;
+  playGoldCollect();
+}
+function shopBuyFail(item) {
+  shopErrorItem = item.id;
+  shopErrorUntil = performance.now() + 450;
+  playOink();
 }
 
 function handleShopClick(e) {
@@ -7851,15 +7913,26 @@ function handleShopClick(e) {
   // Check item buy buttons
   for (var si = 0; si < SHOP_ITEMS.length; si++) {
     var item = SHOP_ITEMS[si];
-    if (item._rect && playerBTC >= item.cost) {
-      // Block double purchase of already active/maxed items
-      if (isShopItemActive(item)) continue;
-      var r = item._rect;
-      if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
-        playerBTC -= item.cost;
-        item.effect();
+    if (!item._rect) continue;
+    var r = item._rect;
+    if (clickX >= r.x && clickX <= r.x + r.w && clickY >= r.y && clickY <= r.y + r.h) {
+      // Already active/maxed or not enough BTC: clear feedback, no charge
+      if (isShopItemActive(item) || playerBTC < item.cost) {
+        shopBuyFail(item);
+        shopSelectedItem = null;
         return;
       }
+      // Mobile: first tap only SELECTS the card (kids tap to read the
+      // description) - the second tap on the same card confirms the purchase
+      if (isMobile && shopSelectedItem !== item.id) {
+        shopSelectedItem = item.id;
+        return;
+      }
+      playerBTC -= item.cost;
+      item.effect();
+      shopBuySuccess(item);
+      shopSelectedItem = null;
+      return;
     }
   }
 
@@ -9897,11 +9970,13 @@ function drawTitle() {
   ctx.lineWidth = 1;
   ctx.fillText('Hvataj nov\u010di\u0107e! Izbegavaj bombe!', WIDTH / 2, HEIGHT / 2 + 10);
 
-  // Player greeting
-  if (playerName) {
+  // Player greeting + lifetime bank balance (all BTC ever earned across runs)
+  if (playerName || totalBTC > 0) {
     ctx.font = '18px sans-serif';
     ctx.fillStyle = '#aaa';
-    ctx.fillText('Igra\u010D: ' + playerName, WIDTH / 2, HEIGHT / 2 + 40);
+    let greetLine = playerName ? 'Igra\u010D: ' + playerName : '';
+    if (totalBTC > 0) greetLine += (greetLine ? '   \u00B7   ' : '') + '\uD83C\uDFE6 Banka: \u20BF ' + totalBTC;
+    ctx.fillText(greetLine, WIDTH / 2, HEIGHT / 2 + 40);
   }
 
   // Start prompt - BIG TAP BUTTON
@@ -9938,7 +10013,7 @@ function drawTitle() {
       var entry = lb[li];
       var medal = li === 0 ? '\uD83E\uDD47' : li === 1 ? '\uD83E\uDD48' : li === 2 ? '\uD83E\uDD49' : '  ';
       ctx.fillStyle = li === 0 ? '#FFD700' : li === 1 ? '#C0C0C0' : li === 2 ? '#CD7F32' : '#aaa';
-      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')', WIDTH / 2, HEIGHT - 145 + li * 22);
+      ctx.fillText(medal + ' ' + entry.name + ' - ' + entry.score + ' pts (Lvl ' + entry.level + ')' + (entry.btc ? '  ₿' + entry.btc : ''), WIDTH / 2, HEIGHT - 145 + li * 22);
     }
   }
 }
@@ -11340,8 +11415,17 @@ function drawVictory() {
   ctx.fillStyle = '#FFD700';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.strokeText('Final Score: ' + game.score, WIDTH / 2, 120);
-  ctx.fillText('Final Score: ' + game.score, WIDTH / 2, 120);
+  ctx.strokeText('Final Score: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+  ctx.fillText('Final Score: ' + game.score + '   ₿ ' + playerBTC, WIDTH / 2, 120);
+
+  // Flawless bonus on the final level must be celebrated, not silent
+  if (victoryFlawless) {
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#F7931A';
+    ctx.lineWidth = 2;
+    ctx.strokeText('⭐ Flawless bonus: +5 ₿', WIDTH / 2, 185);
+    ctx.fillText('⭐ Flawless bonus: +5 ₿', WIDTH / 2, 185);
+  }
 
   // Thank you message (fades in after 3 seconds)
   if (victoryTimer > 3) {
@@ -11428,6 +11512,17 @@ function drawLevelComplete() {
   ctx.strokeText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
   ctx.fillText('Level ' + game.level + ' (' + biomeLabel + ') Complete!' + bossLabel, WIDTH / 2, 40);
   ctx.lineWidth = 1;
+
+  // Level earnings recap - celebrate what THIS level brought in, so players
+  // learn which tactics actually earn BTC (fades in shortly after the totals)
+  const scoreGain = game.score - (game.lastScore || 0);
+  const btcGain = playerBTC - (game.lastBTC || 0);
+  const recapAlpha = Math.min(1, Math.max(0, (levelCompleteTimer - 0.5) * 2));
+  ctx.globalAlpha = recapAlpha;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = '#F7931A';
+  ctx.fillText('Ovaj nivo: ' + (scoreGain >= 0 ? '+' : '') + scoreGain + ' poena   \u00B7   ' + (btcGain >= 0 ? '+' : '') + btcGain + ' \u20BF', WIDTH / 2, HEIGHT - 110);
+  ctx.globalAlpha = 1.0;
 
   // Score
   ctx.font = '28px sans-serif';
