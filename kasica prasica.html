@@ -500,7 +500,7 @@ let shopSkipRect = null;
 let victoryFlawless = false; // did the final level earn the flawless bonus?
 
 const SHOP_ITEMS = [
-  { id: 'extraLife', name: 'Extra \u017Divot', desc: '+1 život (max 6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; game.maxCracks = Math.min(6, game.maxCracks + 1); } },
+  { id: 'extraLife', name: 'Extra \u017Divot', desc: 'Zakrpi ❤️ / +1 max (6)', icon: '\u2764\uFE0F', cost: 5, effect: function() { if (game.maxCracks === undefined) game.maxCracks = 3; if (game.cracks > 0) { game.cracks--; } else { game.maxCracks = Math.min(6, game.maxCracks + 1); } } },
   { id: 'doubleScore', name: '2x Poeni', desc: 'Dupli poeni (1 nivo)', icon: '\uD83D\uDCB0', cost: 10, effect: function() { scoreMultiplier = 2; } },
   { id: 'shield', name: '\u0160tit', desc: 'Jedan besplatan udarac', icon: '\uD83D\uDEE1\uFE0F', cost: 8, effect: function() { hasShield = true; } },
   { id: 'turboFart', name: 'Turbo Prde\u017E', desc: 'Ve\u0107i oblak na slede\u0107em nivou', icon: '\uD83D\uDCA8\uD83D\uDCA8', cost: 7, effect: function() { turboFart = true; } },
@@ -8774,7 +8774,7 @@ function drawShop() {
     var buyBtnW = cardW - (isMobile ? 20 : 40);
     // Boss levels refill wet farts for free - warn instead of taking the money
     var wetFartBossFree = item.id === 'wetFart' && wetFartCharges < MAX_WET_FARTS && !!getBossForLevel(game.level + 1);
-    var isMaxed = (item.id === 'extraLife' && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS) || wetFartBossFree;
+    var isMaxed = (item.id === 'extraLife' && game.cracks === 0 && game.maxCracks >= 6) || (item.id === 'wetFart' && wetFartCharges >= MAX_WET_FARTS) || wetFartBossFree;
     var isActive = !isMaxed && isShopItemActive(item);
     if (isMaxed) {
       ctx.fillStyle = '#555';
@@ -8874,7 +8874,7 @@ function isShopItemActive(item) {
   if (item.id === 'shield') return hasShield;
   if (item.id === 'turboFart') return turboFart;
   if (item.id === 'megaPoop') return megaPoop;
-  if (item.id === 'extraLife') return game.maxCracks >= 6;
+  if (item.id === 'extraLife') return game.cracks === 0 && game.maxCracks >= 6;
   // Boss levels refill wet farts for free - buying them right before a boss
   // would be wasted BTC, so the shop refuses to take the money
   if (item.id === 'wetFart') return wetFartCharges >= MAX_WET_FARTS || !!getBossForLevel(game.level + 1);
